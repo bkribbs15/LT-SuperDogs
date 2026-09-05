@@ -1,0 +1,40 @@
+# Production stack, published on host loopback only and exposed through the
+# same Cloudflare Tunnel setup as the Masters pool (native cloudflared on the
+# Mac host). Add two Public Hostnames in the tunnel:
+#
+#   superdogs.<your-domain>       -> http://localhost:8190   (frontend)
+#   api.superdogs.<your-domain>   -> http://localhost:8100   (backend)
+#
+# Set FRONTEND_URL / VITE_API_URL below to those hostnames, then:
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    env_file: ./backend/.env
+    environment:
+      - FRONTEND_URL=${FRONTEND_URL:-https://superdogs.example.com}
+      - BACKEND_URL=${BACKEND_URL:-https://api.superdogs.example.com}
+      - DEBUG=False
+      - SQLITE_DB_PATH=/data/superdogs.db
+    volumes:
+      # Point DB_DATA_DIR at a persistent path (NAS mount) so the DB survives redeploys
+      - ${DB_DATA_DIR:-./data}:/data
+    ports:
+      - "127.0.0.1:8100:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ${BACKEND_URL:-https://api.superdogs.example.com}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8190:80"
+    restart: unless-stopped

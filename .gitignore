@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+backend/env/
+backend/venv/
+env/
+venv/
+
+# Environment variables / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+*.token
+
+# Node
+node_modules/
+npm-debug.log*
+frontend/dist/
+frontend/.vite/
+
+# Database (the real DB lives on a mounted volume)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+.claude/

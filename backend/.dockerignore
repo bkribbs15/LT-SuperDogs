@@ -1,0 +1,23 @@
+# Local Python virtualenv (wrong platform inside the Linux image) and caches
+env/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local SQLite databases — must never be baked into the image (the real DB is a
+# mounted volume). Prevents shipping stale data.
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets / local config
+.env
+.env.*
+
+# Tests and dev artifacts
+tests/
+.git/
+.gitignore
+*.md

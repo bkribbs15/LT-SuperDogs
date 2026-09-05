@@ -1,0 +1,37 @@
+# Local full-stack test (Podman/Docker) on the LAN — so a phone on the same
+# Wi-Fi can hit it. Ports are offset from the Masters pool (8000/8080/8090),
+# which lives on the same Mac mini.
+#
+#   HOST_IP=$(ipconfig getifaddr en0) \
+#     podman compose -f docker-compose.local.yml up -d --build
+#
+# Then open http://<HOST_IP>:8180 on laptop AND phone.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    env_file: ./backend/.env
+    environment:
+      - FRONTEND_URL=http://${HOST_IP}:8180
+      - BACKEND_URL=http://${HOST_IP}:8100
+      - SQLITE_DB_PATH=/data/superdogs.db
+    volumes:
+      - ./data:/data
+    ports:
+      - "8100:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: http://${HOST_IP}:8100
+    ports:
+      - "8180:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
