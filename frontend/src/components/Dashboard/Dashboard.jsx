@@ -7,14 +7,16 @@ import Page from '../Layout/Page';
 import TeamMark from '../common/TeamMark';
 import Countdown from '../common/Countdown';
 import ResultBadge from '../common/ResultBadge';
-import { fmtSpread, fmtKickoff, ordinal, rankedName } from '../../utils/format';
+import { fmtSpread, fmtKickoff, fmtPoints, ordinal, rankedName, DEFAULT_RULES } from '../../utils/format';
 
-const RULES = [
-  'Every week, pick one game and take the point-spread underdog — the SuperDog.',
-  'Your dog wins the week if it wins outright or covers the spread. A push is a wash.',
+const rulesList = (r) => [
+  `Every week, pick one game and take the point-spread underdog — the SuperDog. Minimum spread is +${r.min_spread}.`,
+  `Cover the spread and score ${r.cover_points} points.`,
+  `Win outright and score ${r.cover_points} plus the spread — a +10.5 dog that wins is worth ${r.cover_points + 10.5}.`,
+  `Lose by exactly the spread and it's a push, worth ${r.push_points} point. A loss is 0.`,
   'First to lock in a dog owns it. Nobody else can take the same team that week.',
   'Picks lock at kickoff. Switch as often as you like before then.',
-  'Most wins at the end of the regular season takes the title. Outright upsets break ties.',
+  'Most points at the end of the regular season takes the title. Outright upsets break ties.',
 ];
 
 const Dashboard = () => {
@@ -41,11 +43,13 @@ const Dashboard = () => {
   const pick = board?.my_pick;
   const players = table?.standings.length || 0;
   const leader = table?.standings[0];
+  const rules = board?.rules || table?.rules || DEFAULT_RULES;
+  const RULES = rulesList(rules);
 
   const stats = [
-    { icon: Target, label: 'Your Record', value: me ? me.record : '0-0', accent: 'navy' },
+    { icon: Zap, label: 'Your Points', value: me ? fmtPoints(me.points) : '0', accent: 'orange' },
     { icon: Trophy, label: 'Your Place', value: me ? `${me.tied ? 'T' : ''}${ordinal(me.rank)}` : '—', accent: 'gold' },
-    { icon: Zap, label: 'Upsets', value: me ? me.upsets : 0, accent: 'orange' },
+    { icon: Target, label: 'Your Record', value: me ? me.record : '0-0', accent: 'navy' },
     { icon: Users, label: 'Picks In', value: board ? `${board.picks_in}/${players}` : '—', accent: 'navy' },
   ];
   const accent = {
@@ -67,7 +71,7 @@ const Dashboard = () => {
           Who's got<br className="sm:hidden" /> <span className="text-gradient-orange">the dog?</span>
         </h1>
         <p className="text-lg text-text-body max-w-xl">
-          Welcome back, {user?.nickname || user?.display_name?.split(' ')[0] || user?.username}. One underdog a week. Most wins takes the year.
+          Welcome back, {user?.nickname || user?.display_name?.split(' ')[0] || user?.username}. One underdog a week. Most points takes the year.
         </p>
       </header>
 
@@ -114,13 +118,14 @@ const Dashboard = () => {
               <div className="mt-auto pt-4 flex items-center justify-between gap-3 flex-wrap">
                 {pick.result || pick.game_status !== 'pre' ? (
                   <div className="flex items-center gap-2 text-sm text-text-muted">
-                    <ResultBadge result={pick.result} gameStatus={pick.game_status} />
+                    <ResultBadge result={pick.result} gameStatus={pick.game_status} points={pick.points} />
                     {pick.team_score != null && <span className="font-mono-data">{pick.team_abbr} {pick.team_score} – {pick.opponent_abbr} {pick.opponent_score}</span>}
                     {pick.status_detail && pick.game_status === 'in' && <span>{pick.status_detail}</span>}
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2 text-sm text-text-muted">
+                  <div className="flex items-center gap-2 text-sm text-text-muted flex-wrap">
                     <Clock className="h-4 w-4 text-text-orange" /> Locks in <Countdown to={pick.kickoff} className="font-semibold text-text-primary" />
+                    <span className="text-text-dim">· worth {fmtPoints(rules.cover_points)} on a cover, {fmtPoints(rules.cover_points + pick.locked_spread)} outright</span>
                   </div>
                 )}
                 {!pick.kicked_off && <Link to="/board" className="btn-outline !py-2">Change pick</Link>}
@@ -161,13 +166,14 @@ const Dashboard = () => {
                     {e.tied ? 'T' : ''}{e.rank}
                   </span>
                   <span className="flex-1 truncate font-semibold text-text-primary">{e.nickname || e.name}</span>
-                  <span className="board-num text-text-primary">{e.record}</span>
+                  <span className="text-xs text-text-muted font-mono-data hidden sm:inline">{e.record}</span>
+                  <span className="board-num text-text-primary">{fmtPoints(e.points)}<span className="text-[10px] text-text-dim ml-0.5">pts</span></span>
                 </li>
               ))}
             </ol>
           )}
           <Link to="/standings" className="btn-secondary self-start mt-5">Full standings <ArrowRight className="h-4 w-4" /></Link>
-          {leader && <p className="mt-3 text-xs text-text-muted">{leader.record} leads · {leader.upsets} outright upset{leader.upsets === 1 ? '' : 's'}</p>}
+          {leader && <p className="mt-3 text-xs text-text-muted">{fmtPoints(leader.points)} pts leads · {leader.record} · {leader.upsets} outright upset{leader.upsets === 1 ? '' : 's'}</p>}
         </div>
       </div>
 

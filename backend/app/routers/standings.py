@@ -1,11 +1,12 @@
-"""Season standings: W-L(-P) records, ranked by wins, then outright upsets."""
+"""Season standings: points (5 cover / 5+spread upset / 1 push), ranked by
+points, then outright upsets, then wins."""
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 
 from app.database import get_db
 from app.middleware.auth_middleware import get_current_user
 from app.schemas.user import UserResponse
-from app.services.season_service import current_season, current_week, first_week, list_weeks, WIN_RESULTS
+from app.services.season_service import current_season, current_week, first_week, list_weeks, points_for, RULES, WIN_RESULTS
 from app.services.pick_views import pick_view, can_see_pick
 
 router = APIRouter(prefix="/api/standings", tags=["Standings"])
@@ -18,7 +19,7 @@ def compute_standings(session, season: int, viewer_id: Optional[str] = None, vie
     table = {
         u["user_id"]: {
             "user_id": u["user_id"], "name": u["name"], "nickname": u["nickname"],
-            "wins": 0, "losses": 0, "pushes": 0, "upsets": 0, "covers": 0, "pending": 0,
+            "points": 0.0, "wins": 0, "losses": 0, "pushes": 0, "upsets": 0, "covers": 0, "pending": 0,
             "picks_made": 0, "picks": [],
         } for u in users
     }
@@ -38,6 +39,9 @@ def compute_standings(session, season: int, viewer_id: Optional[str] = None, vie
             continue
         entry["picks_made"] += 1
         res = p.get("result")
+        pts = points_for(res, p["locked_spread"])
+        if pts is not None:
+            entry["points"] += pts
         if res in WIN_RESULTS:
             entry["wins"] += 1
             entry["upsets" if res == "upset" else "covers"] += 1
@@ -51,12 +55,12 @@ def compute_standings(session, season: int, viewer_id: Optional[str] = None, vie
         entry["picks"].append(pick_view(p, game, p["user_name"], hidden=hidden))
 
     standings = list(table.values())
-    # Most wins, then most outright upsets, then fewest losses, then name
-    standings.sort(key=lambda e: (-e["wins"], -e["upsets"], e["losses"], (e["name"] or "").lower()))
+    # Most points, then most outright upsets, then most wins, then fewest losses, then name
+    standings.sort(key=lambda e: (-e["points"], -e["upsets"], -e["wins"], e["losses"], (e["name"] or "").lower()))
 
     rank, prev_key = 0, None
     for idx, e in enumerate(standings, start=1):
-        key = (e["wins"], e["upsets"], e["losses"])
+        key = (e["points"], e["upsets"], e["wins"])
         if key != prev_key:
             rank, prev_key = idx, key
         e["rank"] = rank
@@ -85,4 +89,5 @@ async def get_standings(season: Optional[int] = Query(None), current_user: UserR
         "weeks": list_weeks(session, season),
         "settled_weeks": settled_weeks,
         "standings": standings,
+        "rules": RULES,
     }

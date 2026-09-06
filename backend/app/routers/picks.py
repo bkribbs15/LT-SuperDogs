@@ -10,7 +10,7 @@ from app.database import get_db
 from app.middleware.auth_middleware import get_current_user
 from app.schemas.user import UserResponse
 from app.services.season_service import (
-    current_season, current_week, underdog_team_id, has_kicked_off, utcnow,
+    current_season, current_week, underdog_team_id, has_kicked_off, utcnow, MIN_SPREAD,
 )
 from app.services.pick_views import pick_view, can_see_pick, team_side
 
@@ -70,6 +70,10 @@ async def make_pick(body: PickCreate, current_user: UserResponse = Depends(get_c
     if body.team_id != dog:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"SuperDogs only — {_team_name(game, dog)} is the underdog in that game")
+    if float(game["spread"]) < MIN_SPREAD:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"SuperDogs must be getting at least +{MIN_SPREAD:g} — "
+                                   f"{_team_name(game, dog)} is only +{float(game['spread']):g}")
     if has_kicked_off(game):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="That game has already kicked off")
 

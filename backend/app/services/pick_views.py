@@ -1,7 +1,7 @@
 """Shared JSON shapes for games and picks so every endpoint speaks the same dialect."""
 from typing import Optional
 
-from app.services.season_service import underdog_team_id, has_kicked_off, WIN_RESULTS
+from app.services.season_service import underdog_team_id, has_kicked_off, is_eligible, points_for, WIN_RESULTS
 
 
 def team_side(game: dict, team_id: str) -> Optional[str]:
@@ -19,7 +19,8 @@ def game_view(game: dict) -> dict:
     started = has_kicked_off(g)
     g["underdog_team_id"] = dog
     g["kicked_off"] = started
-    g["pickable"] = dog is not None and not started
+    g["eligible"] = is_eligible(g)
+    g["pickable"] = g["eligible"] and not started
     g.pop("last_updated", None)
     return g
 
@@ -41,6 +42,7 @@ def pick_view(pick: dict, game: dict, user_name: Optional[str] = None, hidden: b
         "locked_spread": pick["locked_spread"],
         "result": result,
         "is_win": result in WIN_RESULTS if result else None,
+        "points": points_for(result, pick["locked_spread"]),
         "kicked_off": started,
         "game_status": game.get("status"),
         "status_detail": game.get("status_detail"),

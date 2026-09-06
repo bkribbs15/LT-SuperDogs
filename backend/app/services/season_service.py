@@ -1,11 +1,13 @@
 """
 Season / week bookkeeping and the SuperDog scoring rule.
 
-Scoring (College GameDay SuperDog rules):
-  - A pick is the point-spread underdog of one game.
-  - It's a WIN if the dog wins outright ("upset") or loses by less than the
-    spread ("cover"). Losing by exactly the spread is a PUSH; otherwise a LOSS.
-  - Outright upsets are tracked separately and break ties in the standings.
+Scoring (College GameDay SuperDog rules, per the on-air graphic):
+  - A pick is the point-spread underdog of one game, getting at least +4.5.
+  - Cover the spread            -> 5 points
+  - Win outright ("upset")      -> 5 points + the spread (a +10.5 dog = 15.5)
+  - Lose by exactly the spread  -> 1 point (push)
+  - Otherwise                   -> 0 (loss)
+  - Standings rank by points; outright upsets break ties.
 """
 from datetime import datetime, timezone
 from typing import Optional
@@ -14,6 +16,24 @@ from app.config import settings
 from app.database import get_setting
 
 WIN_RESULTS = ("upset", "cover")
+
+MIN_SPREAD = 4.5
+COVER_POINTS = 5.0
+PUSH_POINTS = 1.0
+RULES = {"min_spread": MIN_SPREAD, "cover_points": COVER_POINTS, "push_points": PUSH_POINTS}
+
+
+def points_for(result: Optional[str], locked_spread: float) -> Optional[float]:
+    """Points a settled pick is worth; None while it's still pending."""
+    if result is None:
+        return None
+    if result == "upset":
+        return COVER_POINTS + float(locked_spread)
+    if result == "cover":
+        return COVER_POINTS
+    if result == "push":
+        return PUSH_POINTS
+    return 0.0
 
 
 def first_week() -> int:
@@ -88,6 +108,11 @@ def underdog_team_id(game: dict) -> Optional[str]:
     if fav == game.get("away_team_id"):
         return game.get("home_team_id")
     return None
+
+
+def is_eligible(game: dict) -> bool:
+    """A dog exists and it's getting at least the minimum spread."""
+    return underdog_team_id(game) is not None and float(game.get("spread") or 0) >= MIN_SPREAD
 
 
 def has_kicked_off(game: dict, now: Optional[datetime] = None) -> bool:

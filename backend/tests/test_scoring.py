@@ -22,7 +22,9 @@ from app.database import db, set_setting  # noqa: E402
 from app.services import cfb_data_service as espn  # noqa: E402
 from app.services.season_service import (  # noqa: E402
     resolve_result, resolve_pick, underdog_team_id, has_kicked_off, current_week, current_season,
+    points_for, is_eligible,
 )
+from app.services.pick_views import game_view  # noqa: E402
 from app.services.sync_service import upsert_games, upsert_weeks, resolve_picks  # noqa: E402
 from app.routers import picks as picks_router  # noqa: E402
 from app.routers.standings import compute_standings  # noqa: E402
@@ -135,6 +137,35 @@ class TestResolveResult(unittest.TestCase):
         self.assertFalse(has_kicked_off(game_row("g", kickoff=FUTURE)))
         self.assertTrue(has_kicked_off(game_row("g", kickoff=PAST)))
         self.assertTrue(has_kicked_off(game_row("g", kickoff=FUTURE, status="in")))
+
+
+class TestPoints(unittest.TestCase):
+    """The on-air graphic: 5 for a cover, 5 + spread for an upset, 1 for a push."""
+
+    def test_cover_is_five(self):
+        self.assertEqual(points_for("cover", 6.5), 5.0)
+        self.assertEqual(points_for("cover", 24.5), 5.0)
+
+    def test_upset_is_five_plus_spread(self):
+        self.assertEqual(points_for("upset", 6.5), 11.5)
+        self.assertEqual(points_for("upset", 10), 15.0)
+
+    def test_push_is_one_and_loss_is_zero(self):
+        self.assertEqual(points_for("push", 7), 1.0)
+        self.assertEqual(points_for("loss", 7), 0.0)
+
+    def test_pending_is_none(self):
+        self.assertIsNone(points_for(None, 7))
+
+    def test_minimum_spread_gates_eligibility(self):
+        self.assertTrue(is_eligible(game_row("g", spread=4.5)))
+        self.assertFalse(is_eligible(game_row("g", spread=4)))
+        self.assertFalse(is_eligible(game_row("g", spread=None, favorite=None)))
+        v = game_view(game_row("g", spread=3))
+        self.assertEqual(v["underdog_team_id"], "Ag")   # there is a dog…
+        self.assertFalse(v["eligible"])                  # …just not a SuperDog
+        self.assertFalse(v["pickable"])
+        self.assertTrue(game_view(game_row("g", spread=4.5))["pickable"])
 
 
 # ── ESPN parsing ─────────────────────────────────────────────────────────────
@@ -342,7 +373,7 @@ class TestFirstWeek(_DbTest):
         self.add_pick("u1", "w1", "Aw1", 6.5)
         resolve_picks(self.conn, SEASON)
         s = compute_standings(self.conn, SEASON)
-        self.assertEqual((s[0]["wins"], s[0]["picks_made"]), (0, 0))
+        self.assertEqual((s[0]["wins"], s[0]["picks_made"], s[0]["points"]), (0, 0, 0.0))
 
 
 # ── Making picks: the rules of engagement ────────────────────────────────────
@@ -370,6 +401,17 @@ class TestMakePick(_DbTest):
             await self.pick(u, "a", "Ha")
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertIn("underdog", ctx.exception.detail)
+
+    async def test_under_minimum_spread_is_rejected(self):
+        u = self.add_user_full("u1", "Bryan K")
+        self.add_game(game_id="a", spread=3.5)
+        with self.assertRaises(HTTPException) as ctx:
+            await self.pick(u, "a", "Aa")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("at least +4.5", ctx.exception.detail)
+        self.add_game(game_id="b", spread=4.5)
+        v = await self.pick(u, "b", "Ab")            # exactly the minimum is fine
+        self.assertEqual(v["locked_spread"], 4.5)
 
     async def test_no_line_is_rejected(self):
         u = self.add_user_full("u1", "Bryan K")
@@ -450,24 +492,38 @@ class TestMakePick(_DbTest):
 # ── Standings ────────────────────────────────────────────────────────────────
 
 class TestStandings(_DbTest):
-    async def test_ranking_wins_then_upsets_then_losses(self):
+    async def test_ranking_by_points_then_upsets(self):
         for uid, name in [("u1", "Bryan K"), ("u2", "Mike T"), ("u3", "Dan S"), ("u4", "Zed Q")]:
             self.add_user(uid, name)
         # Week 1 finals
-        self.add_game(game_id="a", status="post", home_score=10, away_score=20)   # away dog upset
-        self.add_game(game_id="b", status="post", home_score=20, away_score=17)   # away dog cover (spread 6.5)
-        self.add_game(game_id="c", status="post", home_score=30, away_score=3)    # away dog loss
+        self.add_game(game_id="a", status="post", home_score=10, away_score=20)   # away dog upset  -> 5 + 6.5
+        self.add_game(game_id="b", status="post", home_score=20, away_score=17)   # away dog cover  -> 5
+        self.add_game(game_id="c", status="post", home_score=30, away_score=3)    # away dog loss   -> 0
         self.add_pick("u1", "a", "Aa", 6.5)
         self.add_pick("u2", "b", "Ab", 6.5)
         self.add_pick("u3", "c", "Ac", 6.5)
         resolve_picks(self.conn, SEASON)
 
         s = compute_standings(self.conn, SEASON)
-        # Bryan (upset) edges Mike (cover) on the tiebreaker; Zed 0-0 sits above Dan 0-1
         self.assertEqual([e["name"] for e in s], ["Bryan K", "Mike T", "Zed Q", "Dan S"])
-        self.assertEqual([e["rank"] for e in s], [1, 2, 3, 4])
+        self.assertEqual([e["points"] for e in s], [11.5, 5.0, 0.0, 0.0])
+        # Zed (0-0) and Dan (0-1) both sit on 0 points: tied at 3rd, Zed listed first on fewer losses
+        self.assertEqual([e["rank"] for e in s], [1, 2, 3, 3])
+        self.assertEqual([e["tied"] for e in s], [False, False, True, True])
         self.assertEqual([e["record"] for e in s], ["1-0", "1-0", "0-0", "0-1"])
         self.assertEqual((s[0]["upsets"], s[1]["covers"]), (1, 1))
+        self.assertEqual(s[0]["picks"][0]["points"], 11.5)
+
+    async def test_big_dog_cover_ties_small_dog_cover_but_upset_scales(self):
+        self.add_user("u1", "Bryan K")
+        self.add_user("u2", "Mike T")
+        self.add_game(game_id="a", status="post", home_score=21, away_score=24, spread=24.5)  # +24.5 dog wins -> 29.5
+        self.add_game(game_id="b", status="post", home_score=21, away_score=17, spread=24.5)  # +24.5 dog covers -> 5
+        self.add_pick("u1", "a", "Aa", 24.5)
+        self.add_pick("u2", "b", "Ab", 24.5)
+        resolve_picks(self.conn, SEASON)
+        s = compute_standings(self.conn, SEASON)
+        self.assertEqual([(e["name"], e["points"]) for e in s], [("Bryan K", 29.5), ("Mike T", 5.0)])
 
     async def test_tie_flags_and_records(self):
         self.add_user("u1", "Bryan K")
@@ -490,6 +546,7 @@ class TestStandings(_DbTest):
         s = compute_standings(self.conn, SEASON)
         self.assertEqual(s[0]["record"], "0-0-1")
         self.assertEqual(s[0]["pushes"], 1)
+        self.assertEqual(s[0]["points"], 1.0)
 
     async def test_unstarted_picks_are_hidden_from_others(self):
         self.add_user("u1", "Bryan K")

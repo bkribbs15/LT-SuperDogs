@@ -5,7 +5,7 @@ from typing import Optional
 from app.database import get_db
 from app.middleware.auth_middleware import get_current_user
 from app.schemas.user import UserResponse
-from app.services.season_service import current_season, current_week, list_weeks, underdog_team_id
+from app.services.season_service import current_season, current_week, list_weeks, RULES
 from app.services.pick_views import game_view, pick_view, can_see_pick
 
 router = APIRouter(prefix="/api/board", tags=["Board"])
@@ -57,6 +57,7 @@ def build_board(session, user: UserResponse, season: int, week: Optional[int]) -
         "my_pick": my_pick,
         "first_kickoff": first_kickoff,
         "picks_in": len(picks),
+        "rules": RULES,
     }
 
 

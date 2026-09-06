@@ -12,7 +12,7 @@ from app.services.auth_service import (
     get_password_hash, list_pending_reset_tokens, get_reset_token, mark_token_as_used,
 )
 from app.config import is_owner_email
-from app.services.season_service import current_season, current_week, first_week, list_weeks, has_kicked_off, utcnow
+from app.services.season_service import current_season, current_week, first_week, list_weeks, has_kicked_off, utcnow, MIN_SPREAD
 from app.services.sync_service import sync_week, sync_current, resolve_picks
 from app.services.pick_views import team_side
 from app.tasks.sync_scheduler import get_scheduler_status
@@ -189,13 +189,19 @@ async def set_spread(game_id: str, body: SpreadUpdate, current_admin: UserRespon
     session.execute(
         "UPDATE games SET spread = ?, favorite_team_id = ?, spread_source = 'manual', last_updated = ? WHERE game_id = ?",
         (body.spread, favorite, utcnow().isoformat(), game_id))
+    removed = 0
     if not has_kicked_off(game):
-        # A changed favorite orphans picks on the old dog — drop them so the board stays honest
-        session.execute("DELETE FROM picks WHERE game_id = ? AND team_id = ?", (game_id, favorite or ""))
-        session.execute("UPDATE picks SET locked_spread = ?, updated_at = ? WHERE game_id = ?",
-                        (body.spread, utcnow().isoformat(), game_id))
+        # A changed favorite orphans picks on the old dog, and a line under the
+        # minimum makes the game ineligible — drop those picks so the board stays honest
+        if body.spread < MIN_SPREAD:
+            removed = session.execute("DELETE FROM picks WHERE game_id = ?", (game_id,)).rowcount
+        else:
+            removed = session.execute("DELETE FROM picks WHERE game_id = ? AND team_id = ?", (game_id, favorite or "")).rowcount
+            session.execute("UPDATE picks SET locked_spread = ?, updated_at = ? WHERE game_id = ?",
+                            (body.spread, utcnow().isoformat(), game_id))
     session.commit()
-    return {"message": "Spread updated", "game_id": game_id, "spread": body.spread, "favorite_team_id": favorite}
+    msg = "Spread updated" + (f" — {removed} pick(s) removed (dog no longer eligible)" if removed else "")
+    return {"message": msg, "game_id": game_id, "spread": body.spread, "favorite_team_id": favorite, "picks_removed": removed}
 
 
 class ResultUpdate(BaseModel):

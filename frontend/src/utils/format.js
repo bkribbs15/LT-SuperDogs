@@ -12,11 +12,17 @@ export const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString([], { mo
 /** "+6.5" — the points the dog is getting. */
 export const fmtSpread = (n) => (n == null ? '—' : `+${Number(n) % 1 === 0 ? Number(n) : n}`);
 
+/** The on-air SuperDog rules. The API sends the same numbers; these are the fallback. */
+export const DEFAULT_RULES = { min_spread: 4.5, cover_points: 5, push_points: 1 };
+
+/** "11.5" / "5" / "0" — points are halves at most, so plain String() is right. */
+export const fmtPoints = (n) => (n == null ? '—' : String(n));
+
 export const RESULTS = {
-  upset: { label: 'Upset', short: 'W', badge: 'badge-upset', text: 'text-result-upset', win: true },
-  cover: { label: 'Covered', short: 'W', badge: 'badge-cover', text: 'text-result-cover', win: true },
-  loss:  { label: 'Loss', short: 'L', badge: 'badge-loss', text: 'text-result-loss', win: false },
-  push:  { label: 'Push', short: 'P', badge: 'badge-push', text: 'text-result-push', win: false },
+  upset: { label: 'Upset', short: 'W', badge: 'badge-upset', text: 'text-result-upset', win: true, scoring: '5 + the spread' },
+  cover: { label: 'Covered', short: 'W', badge: 'badge-cover', text: 'text-result-cover', win: true, scoring: '5 points' },
+  loss:  { label: 'Loss', short: 'L', badge: 'badge-loss', text: 'text-result-loss', win: false, scoring: '0 points' },
+  push:  { label: 'Push', short: 'P', badge: 'badge-push', text: 'text-result-push', win: false, scoring: '1 point' },
 };
 
 export const resultMeta = (result) => RESULTS[result] || null;

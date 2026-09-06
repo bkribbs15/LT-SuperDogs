@@ -6,7 +6,7 @@ import { User, Lock, Save, Eye, EyeOff, Shield, Trophy, Zap, Target, Dog } from 
 import Alert from '../common/Alert';
 import TeamMark from '../common/TeamMark';
 import ResultBadge from '../common/ResultBadge';
-import { fmtSpread, fmtKickoff, ordinal, initials, rankedName } from '../../utils/format';
+import { fmtSpread, fmtKickoff, fmtPoints, ordinal, initials, rankedName } from '../../utils/format';
 
 const Profile = () => {
   const { user, updateUser, isOwner } = useAuth();
@@ -83,10 +83,10 @@ const Profile = () => {
   };
 
   const statCards = [
-    { label: 'Record', value: me ? me.record : '—', icon: Target },
+    { label: 'Points', value: me ? fmtPoints(me.points) : '—', icon: Zap },
     { label: 'Place', value: me ? `${me.tied ? 'T' : ''}${ordinal(me.rank)}` : '—', icon: Trophy },
-    { label: 'Upsets', value: me ? me.upsets : '—', icon: Zap },
-    { label: 'Picks Made', value: me ? me.picks_made : '—', icon: Dog },
+    { label: 'Record', value: me ? me.record : '—', icon: Target },
+    { label: 'Upsets', value: me ? me.upsets : '—', icon: Dog },
   ];
 
   return (
@@ -144,7 +144,7 @@ const Profile = () => {
                       {p.game_status === 'pre' ? ` · ${fmtKickoff(p.kickoff)}` : p.team_score != null ? ` · ${p.team_score}–${p.opponent_score}` : ''}
                     </div>
                   </div>
-                  <ResultBadge result={p.result} gameStatus={p.game_status} />
+                  <ResultBadge result={p.result} gameStatus={p.game_status} points={p.points} />
                 </div>
               ))}
             </div>

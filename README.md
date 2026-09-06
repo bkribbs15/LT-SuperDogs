@@ -1,22 +1,25 @@
 # LT SuperDogs
 
 A College GameDay–style **SuperDog pick'em** for college football. Every week each
-player takes one point-spread underdog. Win outright or cover and you get the W.
-Most wins at the end of the regular season takes the year.
+player takes one point-spread underdog of at least +4.5. Covers score 5, outright
+upsets score 5 plus the spread, pushes score 1. Most points at the end of the
+regular season takes the year.
 
 Sister app to the [LT Masters Pool](../masters-pool) — same stack, same auth model.
 
-## The rules
+## The rules (straight from the GameDay graphic)
 
-1. **One SuperDog a week.** Pick any FBS game and take the underdog.
-2. **Win = outright upset or a cover.** Lose by exactly the spread and it's a push
-   (neither). Lose by more and it's an L.
-3. **No duplicate dogs.** First to lock a team in owns it for the week; everyone
+1. **One SuperDog a week.** Pick any FBS game and take the underdog. **Minimum
+   spread is +4.5** — smaller dogs aren't on the board.
+2. **Cover the spread: 5 points.**
+3. **Win outright: 5 points + the spread.** A +10.5 dog that wins is worth 15.5.
+4. **Push (lose by exactly the spread): 1 point.** A loss is 0.
+5. **No duplicate dogs.** First to lock a team in owns it for the week; everyone
    else has to find a different game.
-4. **Picks lock at kickoff** of your game. Switch as often as you like before then.
-5. **The spread you saw is the spread you get.** Lines move all week; yours freezes
-   the moment you pick.
-6. **Standings** rank by wins, then outright upsets, then fewest losses. Picks stay
+6. **Picks lock at kickoff** of your game. Switch as often as you like before then.
+7. **The spread you saw is the spread you get.** Lines move all week; yours freezes
+   the moment you pick, and that's the number your points are computed from.
+8. **Standings** rank by total points, then outright upsets, then wins. Picks stay
    hidden from other players until the game kicks off.
 
 ## Tech stack

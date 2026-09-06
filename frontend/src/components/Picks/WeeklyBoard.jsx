@@ -8,7 +8,7 @@ import TeamMark from '../common/TeamMark';
 import Countdown from '../common/Countdown';
 import Alert from '../common/Alert';
 import Spinner from '../common/Spinner';
-import { fmtSpread, fmtKickoff, rankedName } from '../../utils/format';
+import { fmtSpread, fmtKickoff, fmtPoints, rankedName, DEFAULT_RULES } from '../../utils/format';
 
 const FILTERS = [
   { value: 'available', label: 'Available' },
@@ -111,6 +111,7 @@ const WeeklyBoard = () => {
 
   const myPick = board?.my_pick;
   const weeks = board?.weeks || [];
+  const rules = board?.rules || DEFAULT_RULES;
   const goWeek = (w) => navigate(w === board.current_week ? '/board' : `/board/${w}`);
 
   const Header = board && (
@@ -129,7 +130,7 @@ const WeeklyBoard = () => {
       eyebrow={board ? `${board.season} Season` : 'The Board'}
       icon={ClipboardList}
       title={board ? `Week ${board.week} Board` : 'The Board'}
-      subtitle={board ? `${board.picks_in} pick${board.picks_in === 1 ? '' : 's'} in · lines refresh every 10 min · times shown in your local zone` : ''}
+      subtitle={board ? `${board.picks_in} pick${board.picks_in === 1 ? '' : 's'} in · min spread +${rules.min_spread} · cover ${fmtPoints(rules.cover_points)} pts, outright win ${fmtPoints(rules.cover_points)} + spread · lines refresh every 10 min` : ''}
       actions={Header}
     >
       <Alert className="mb-4">{error}</Alert>
@@ -146,7 +147,7 @@ const WeeklyBoard = () => {
                 <div className="font-display text-2xl sm:text-3xl font-bold leading-tight truncate">
                   {rankedName(myPick.team_rank, myPick.team_name)} <span className="text-dog-orange">{fmtSpread(myPick.locked_spread)}</span>
                 </div>
-                <div className="text-sm text-white/75 truncate">{myPick.side === 'home' ? 'vs' : 'at'} {rankedName(myPick.opponent_rank, myPick.opponent_name)} · {fmtKickoff(myPick.kickoff)}</div>
+                <div className="text-sm text-white/75 truncate">{myPick.side === 'home' ? 'vs' : 'at'} {rankedName(myPick.opponent_rank, myPick.opponent_name)} · {fmtKickoff(myPick.kickoff)} · worth {fmtPoints(rules.cover_points)} on a cover, {fmtPoints(rules.cover_points + myPick.locked_spread)} outright</div>
               </div>
               {myPick.kicked_off ? (
                 <span className="badge bg-white/15 text-white border border-white/25"><Lock className="h-3 w-3" /> Locked</span>
@@ -206,7 +207,7 @@ const WeeklyBoard = () => {
               </h2>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                 {list.map((g) => (
-                  <GameCard key={g.game_id} game={g} canPick={isCurrentWeek} hasPick={!!myPick} busy={busy === g.game_id} onPick={() => takeDog(g)} userId={user.user_id} />
+                  <GameCard key={g.game_id} game={g} canPick={isCurrentWeek} hasPick={!!myPick} busy={busy === g.game_id} onPick={() => takeDog(g)} rules={rules} />
                 ))}
               </div>
             </section>
@@ -237,16 +238,19 @@ const TeamRow = ({ side, game, isDog }) => {
   );
 };
 
-const GameCard = ({ game: g, canPick, hasPick, busy, onPick }) => {
+const GameCard = ({ game: g, canPick, hasPick, busy, onPick, rules }) => {
   const dogSide = g.underdog_team_id === g.home_team_id ? 'home' : g.underdog_team_id === g.away_team_id ? 'away' : null;
   const dogAbbr = dogSide ? g[`${dogSide}_abbr`] : null;
   const noLine = !dogSide;
+  const tooSmall = dogSide && !g.eligible;
 
   let action;
   if (g.is_mine) {
     action = <span className="badge badge-upset !py-1.5 !px-3 !text-[11px]"><Check className="h-3.5 w-3.5" /> Your dog</span>;
   } else if (noLine) {
     action = <span className="badge badge-muted !py-1.5 !px-3 !text-[11px]">{g.spread === 0 ? "Pick'em" : 'No line yet'}</span>;
+  } else if (tooSmall) {
+    action = <span className="badge badge-muted !py-1.5 !px-3 !text-[11px]" title={`SuperDogs must be getting at least +${rules.min_spread}`}>Under +{rules.min_spread} min</span>;
   } else if (g.taken) {
     action = <span className="badge badge-muted !py-1.5 !px-3 !text-[11px]" title={g.taken_by ? `Taken by ${g.taken_by}` : 'Taken'}>{g.taken_by ? `${g.taken_by.split(' ')[0]} has ${dogAbbr}` : `${dogAbbr} taken`}</span>;
   } else if (g.kicked_off) {
@@ -266,14 +270,14 @@ const GameCard = ({ game: g, canPick, hasPick, busy, onPick }) => {
       : <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> {fmtKickoff(g.kickoff)}</span>;
 
   return (
-    <div className={`game-card p-4 ${g.is_mine ? 'game-card--mine' : ''} ${g.taken && !g.is_mine && g.status === 'pre' ? 'game-card--locked' : ''}`}>
+    <div className={`game-card p-4 ${g.is_mine ? 'game-card--mine' : ''} ${(g.taken && !g.is_mine && g.status === 'pre') || (tooSmall && g.status === 'pre') ? 'game-card--locked' : ''}`}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="text-xs text-text-muted flex items-center gap-3 flex-wrap">
           {statusLine}
           {g.broadcast && <span className="flex items-center gap-1"><Tv className="h-3.5 w-3.5" /> {g.broadcast}</span>}
         </div>
         {dogSide && (
-          <span className={`spread-chip ${g.is_mine ? 'spread-chip--dog' : ''}`} title={`${dogAbbr} getting ${g.spread}`}>{dogAbbr} {fmtSpread(g.spread)}</span>
+          <span className={`spread-chip ${g.is_mine ? 'spread-chip--dog' : ''} ${tooSmall ? 'opacity-40' : ''}`} title={tooSmall ? `Under the +${rules.min_spread} minimum` : `${dogAbbr} getting ${g.spread} · ${fmtPoints(rules.cover_points)} for a cover, ${fmtPoints(rules.cover_points + g.spread)} outright`}>{dogAbbr} {fmtSpread(g.spread)}</span>
         )}
       </div>
       <div className="space-y-2.5">
