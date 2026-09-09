@@ -36,7 +36,11 @@ const WeeklyBoard = () => {
       silent ? setRefreshing(true) : setLoading(true);
       const data = weekParam ? await boardAPI.getWeek(Number(weekParam)) : await boardAPI.getCurrent();
       setBoard(data);
-      if (!silent) setError('');
+      if (!silent) {
+        setError('');
+        // Past/future weeks have nothing "available" — open them on the full list
+        setFilter(data.week === data.current_week ? 'available' : 'all');
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not load the board');
     } finally {
@@ -149,7 +153,12 @@ const WeeklyBoard = () => {
                 </div>
                 <div className="text-sm text-white/75 truncate">{myPick.side === 'home' ? 'vs' : 'at'} {rankedName(myPick.opponent_rank, myPick.opponent_name)} · {fmtKickoff(myPick.kickoff)} · worth {fmtPoints(rules.cover_points)} on a cover, {fmtPoints(rules.cover_points + myPick.locked_spread)} outright</div>
               </div>
-              {myPick.kicked_off ? (
+              {myPick.game_status === 'canceled' ? (
+                <div className="flex items-center gap-3">
+                  <span className="badge badge-loss">Postponed · pick another dog</span>
+                  <button onClick={dropDog} disabled={busy === 'drop'} className="btn-outline !border-white/30 !text-white hover:!bg-white/10 !py-2"><X className="h-4 w-4" /> Drop</button>
+                </div>
+              ) : myPick.kicked_off ? (
                 <span className="badge bg-white/15 text-white border border-white/25"><Lock className="h-3 w-3" /> Locked</span>
               ) : (
                 <div className="flex items-center gap-3">
@@ -165,8 +174,8 @@ const WeeklyBoard = () => {
                 <div className="font-display text-2xl font-bold text-text-primary leading-tight">No dog yet</div>
                 <div className="text-sm text-text-muted">Take one below. You can switch until your game kicks off.</div>
               </div>
-              {board.first_kickoff && (
-                <div className="text-sm text-text-muted flex items-center gap-1.5"><Clock className="h-4 w-4 text-text-orange" /> First kick <Countdown to={board.first_kickoff} done="underway" className="font-semibold text-text-primary" /></div>
+              {board.next_kickoff && (
+                <div className="text-sm text-text-muted flex items-center gap-1.5"><Clock className="h-4 w-4 text-text-orange" /> Next kick <Countdown to={board.next_kickoff} done="underway" className="font-semibold text-text-primary" /></div>
               )}
             </>
           )}
@@ -219,7 +228,7 @@ const WeeklyBoard = () => {
 };
 
 const TeamRow = ({ side, game, isDog }) => {
-  const name = game[`${side}_name`], abbr = game[`${side}_abbr`], rank = game[`${side}_rank`], score = game[`${side}_score`];
+  const name = game[`${side}_name`], abbr = game[`${side}_abbr`], rank = game[`${side}_rank`], score = game[`${side}_score`], record = game[`${side}_record`];
   const won = game.status === 'post' && game.home_score != null && game.away_score != null &&
     (side === 'home' ? game.home_score > game.away_score : game.away_score > game.home_score);
   return (
@@ -229,6 +238,7 @@ const TeamRow = ({ side, game, isDog }) => {
         <div className={`font-semibold truncate ${isDog ? 'text-text-primary' : 'text-text-secondary'}`}>
           {rank && <span className="text-text-muted font-mono-data text-xs mr-1">#{rank}</span>}
           {name}
+          {record && <span className="ml-1.5 text-xs font-normal text-text-dim">({record})</span>}
           {isDog && <span className="ml-2 badge badge-navy !py-0 !px-1.5 !text-[9px]">Dog</span>}
         </div>
         <div className="text-xs text-text-dim">{side === 'home' ? 'Home' : 'Away'}</div>
@@ -245,7 +255,9 @@ const GameCard = ({ game: g, canPick, hasPick, busy, onPick, rules }) => {
   const tooSmall = dogSide && !g.eligible;
 
   let action;
-  if (g.is_mine) {
+  if (g.status === 'canceled') {
+    action = <span className="badge badge-loss !py-1.5 !px-3 !text-[11px]">{g.is_mine ? 'Your dog · postponed' : 'Postponed'}</span>;
+  } else if (g.is_mine) {
     action = <span className="badge badge-upset !py-1.5 !px-3 !text-[11px]"><Check className="h-3.5 w-3.5" /> Your dog</span>;
   } else if (noLine) {
     action = <span className="badge badge-muted !py-1.5 !px-3 !text-[11px]">{g.spread === 0 ? "Pick'em" : 'No line yet'}</span>;
@@ -263,14 +275,16 @@ const GameCard = ({ game: g, canPick, hasPick, busy, onPick, rules }) => {
     );
   }
 
-  const statusLine = g.status === 'in'
+  const statusLine = g.status === 'canceled'
+    ? <span className="font-semibold text-result-loss">{g.status_detail || 'Postponed'}</span>
+    : g.status === 'in'
     ? <span className="flex items-center gap-1.5 text-text-orange font-semibold"><span className="live-dot" /> {g.status_detail || 'Live'}</span>
     : g.status === 'post'
       ? <span className="font-semibold text-text-muted">{g.status_detail || 'Final'}</span>
       : <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> {fmtKickoff(g.kickoff)}</span>;
 
   return (
-    <div className={`game-card p-4 ${g.is_mine ? 'game-card--mine' : ''} ${(g.taken && !g.is_mine && g.status === 'pre') || (tooSmall && g.status === 'pre') ? 'game-card--locked' : ''}`}>
+    <div className={`game-card p-4 ${g.is_mine ? 'game-card--mine' : ''} ${(g.taken && !g.is_mine && g.status === 'pre') || (tooSmall && g.status === 'pre') || g.status === 'canceled' ? 'game-card--locked' : ''}`}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="text-xs text-text-muted flex items-center gap-3 flex-wrap">
           {statusLine}

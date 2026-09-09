@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState, useCallback } from 'react';
 import {
   Shield, Users, Calendar, CheckCircle, KeyRound, Power, PowerOff, ShieldCheck, ShieldOff,
-  UserPlus, Check, X, RefreshCw, Save, Trash2, Inbox, ClipboardList,
+  UserPlus, Check, X, RefreshCw, Save, Trash2, Inbox, ClipboardList, Mail, Link2,
 } from 'lucide-react';
 import Page from '../Layout/Page';
 import Alert from '../common/Alert';
@@ -90,6 +90,21 @@ const AdminSettings = () => {
   const [picks, setPicks] = useState([]);
   const [loadingGames, setLoadingGames] = useState(false);
   const [edits, setEdits] = useState({}); // game_id -> {spread, favorite_team_id, home_score, away_score}
+  const [gameFilter, setGameFilter] = useState('');
+  const [testingEmail, setTestingEmail] = useState(false);
+
+  const sendTest = async () => {
+    setTestingEmail(true);
+    try { const r = await adminAPI.testEmail(); flash(r.sent, r.message); } catch (err) { fail(err, 'Test failed'); } finally { setTestingEmail(false); }
+  };
+  const copyShare = async () => {
+    try { await navigator.clipboard.writeText(season.share_url); flash(true, 'Share link copied'); } catch { window.prompt('Copy this link:', season.share_url); }
+  };
+  const rotateShare = async () => {
+    if (!window.confirm('Rotate the public standings link? The old link will stop working.')) return;
+    try { await adminAPI.rotateShare(); flash(true, 'New share link created'); fetchSeason(); } catch (err) { fail(err, 'Failed to rotate'); }
+  };
+  const shownGames = games.filter((g) => !gameFilter || `${g.short_name} ${g.home_name} ${g.away_name}`.toLowerCase().includes(gameFilter.toLowerCase()));
 
   const fetchSeason = useCallback(async () => {
     try {
@@ -356,6 +371,34 @@ const AdminSettings = () => {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div className="card">
+              <div className="flex items-center gap-2 mb-3">
+                <Mail className="h-5 w-5 text-dog-navy" />
+                <h2 className="font-display text-2xl font-bold text-text-primary">Email</h2>
+                {season && <span className={`badge ${season.email?.configured ? 'badge-upset' : 'badge-muted'}`}>{season.email?.configured ? 'On' : 'Off'}</span>}
+              </div>
+              {season?.email?.configured ? (
+                <p className="text-sm text-text-body mb-4">Sending as <span className="font-semibold">{season.email.from}</span> via {season.email.host}. Reminders go out {season.email.reminder_hours.split(',').map((h) => `${h.trim()}h`).join(' and ')} before the week's first kickoff to anyone without a pick; result emails when a dog settles. {season.email.sent} sent so far.</p>
+              ) : (
+                <p className="text-sm text-text-body mb-4">Not configured. Set <code className="font-mono-data text-xs">SMTP_HOST</code>, <code className="font-mono-data text-xs">SMTP_FROM</code>, <code className="font-mono-data text-xs">SMTP_USER</code> and <code className="font-mono-data text-xs">SMTP_PASSWORD</code> in <code className="font-mono-data text-xs">backend/.env</code> and restart. A Gmail app password works.</p>
+              )}
+              <button onClick={sendTest} disabled={testingEmail} className="btn-secondary !py-2"><Mail className="h-4 w-4" /> {testingEmail ? 'Sending…' : 'Send me a test email'}</button>
+            </div>
+            <div className="card">
+              <div className="flex items-center gap-2 mb-3">
+                <Link2 className="h-5 w-5 text-dog-navy" />
+                <h2 className="font-display text-2xl font-bold text-text-primary">Public standings link</h2>
+              </div>
+              <p className="text-sm text-text-body mb-3">Read-only, no login. Paste it in the group chat. Picks stay hidden until kickoff, same as in the app.</p>
+              {season?.share_url && <div className="font-mono-data text-xs bg-white/70 border border-glass rounded-lg px-3 py-2 mb-3 break-all">{season.share_url}</div>}
+              <div className="flex gap-2">
+                <button onClick={copyShare} className="btn-primary !py-2"><Link2 className="h-4 w-4" /> Copy link</button>
+                <button onClick={rotateShare} className="btn-outline !py-2">Rotate</button>
+              </div>
+            </div>
+          </div>
+
           <div className="card">
             <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
               <div className="flex items-center gap-2">
@@ -363,6 +406,7 @@ const AdminSettings = () => {
                 <h2 className="font-display text-2xl font-bold text-text-primary">Games</h2>
               </div>
               <div className="flex items-center gap-2">
+                <input type="search" value={gameFilter} onChange={(e) => setGameFilter(e.target.value)} placeholder="Filter teams…" className="input-field !w-40 !py-2" />
                 <select value={gamesWeek ?? ''} onChange={(e) => setGamesWeek(Number(e.target.value))} className="input-field !w-auto !py-2 font-semibold">
                   {(season?.weeks || []).map((w) => <option key={w.week} value={w.week}>{w.label}</option>)}
                 </select>
@@ -379,13 +423,13 @@ const AdminSettings = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-black/[0.06]">
-                    {games.map((g) => {
+                    {shownGames.map((g) => {
                       const gp = picks.filter((p) => p.game_id === g.game_id);
                       return (
                         <tr key={g.game_id} className="hover:bg-white/40 align-top">
                           <td className="px-3 py-2.5 whitespace-nowrap">
                             <div className="font-semibold text-text-primary">{g.away_abbr} @ {g.home_abbr}</div>
-                            <div className="text-xs text-text-muted">{g.status === 'in' ? <span className="text-text-orange font-semibold">● {g.status_detail}</span> : g.status === 'post' ? 'Final' : 'Scheduled'}{g.spread_source === 'manual' && <span className="badge badge-gold ml-1.5 !text-[9px]">manual line</span>}</div>
+                            <div className="text-xs text-text-muted">{g.status === 'in' ? <span className="text-text-orange font-semibold">● {g.status_detail}</span> : g.status === 'post' ? 'Final' : g.status === 'canceled' ? <span className="text-result-loss font-semibold">{g.status_detail || 'Postponed'}</span> : 'Scheduled'}{g.spread_source === 'manual' && <span className="badge badge-gold ml-1.5 !text-[9px]">manual line</span>}</div>
                           </td>
                           <td className="px-3 py-2.5 whitespace-nowrap text-text-body">{fmtKickoff(g.kickoff)}</td>
                           <td className="px-3 py-2.5 whitespace-nowrap">
@@ -432,6 +476,7 @@ const AdminSettings = () => {
                   </tbody>
                 </table>
                 {games.length === 0 && <p className="text-center text-text-muted py-8">No games loaded for this week. Run a sync.</p>}
+                {games.length > 0 && shownGames.length === 0 && <p className="text-center text-text-muted py-8">No games match "{gameFilter}".</p>}
               </div>
             )}
           </div>

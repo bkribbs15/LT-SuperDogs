@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import Page from '../Layout/Page';
 import { useAuth } from '../../context/AuthContext';
 import { authAPI, picksAPI, standingsAPI } from '../../services/api';
-import { User, Lock, Save, Eye, EyeOff, Shield, Trophy, Zap, Target, Dog } from 'lucide-react';
+import { User, Lock, Save, Eye, EyeOff, Shield, Trophy, Zap, Target, Dog, Flame, Bell, Award, BarChart3 } from 'lucide-react';
 import Alert from '../common/Alert';
 import TeamMark from '../common/TeamMark';
 import ResultBadge from '../common/ResultBadge';
@@ -15,6 +15,7 @@ const Profile = () => {
   const [savingPassword, setSavingPassword] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState(null);
   const [picks, setPicks] = useState([]);
+  const [stats, setStats] = useState(null);
   const [me, setMe] = useState(null);
   const [season, setSeason] = useState(null);
   const [loadingPicks, setLoadingPicks] = useState(true);
@@ -23,6 +24,8 @@ const Profile = () => {
     display_name: user?.display_name || user?.username || '',
     nickname: user?.nickname || '',
     email: user?.email || '',
+    email_reminders: user?.email_reminders !== false,
+    email_results: user?.email_results !== false,
   });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [showPasswords, setShowPasswords] = useState({ current: false, new: false, confirm: false });
@@ -31,7 +34,8 @@ const Profile = () => {
     (async () => {
       try {
         const [mine, table] = await Promise.all([picksAPI.getMine(), standingsAPI.get()]);
-        setPicks(mine);
+        setPicks(mine.picks);
+        setStats(mine.stats);
         setSeason(table.season);
         setMe(table.standings.find((e) => e.user_id === user.user_id) || null);
       } catch (err) {
@@ -55,6 +59,7 @@ const Profile = () => {
       const updated = await authAPI.updateProfile({
         username: profileForm.display_name, display_name: profileForm.display_name,
         nickname: profileForm.nickname, email: profileForm.email,
+        email_reminders: profileForm.email_reminders, email_results: profileForm.email_results,
       });
       updateUser(updated);
       flash(setMessage, 'success', 'Profile updated!');
@@ -122,6 +127,31 @@ const Profile = () => {
           ))}
         </div>
 
+        {stats && stats.picks_made > 0 && (
+          <div className="card">
+            <div className="flex items-center gap-2 mb-4">
+              <BarChart3 className="h-5 w-5 text-dog-navy" />
+              <h2 className="font-display text-2xl font-bold text-text-primary">Season stats</h2>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {[
+                { icon: Flame, label: 'Current streak', value: stats.current_streak ? `${stats.current_streak} straight` : '—', sub: stats.longest_streak ? `best ${stats.longest_streak}` : null },
+                { icon: Award, label: 'Best week', value: stats.best_week ? fmtPoints(stats.best_week.points) : '—', sub: stats.best_week ? `Wk ${stats.best_week.week} · ${stats.best_week.team_abbr}` : null },
+                { icon: Zap, label: 'Biggest upset', value: stats.biggest_upset ? fmtSpread(stats.biggest_upset.locked_spread) : '—', sub: stats.biggest_upset ? `${stats.biggest_upset.team_abbr} · Wk ${stats.biggest_upset.week}` : 'none yet' },
+                { icon: Target, label: 'Avg spread taken', value: stats.avg_spread != null ? fmtSpread(stats.avg_spread) : '—', sub: `${stats.picks_made} pick${stats.picks_made === 1 ? '' : 's'}` },
+                { icon: Trophy, label: 'Favorite conference', value: stats.favorite_conference ? stats.favorite_conference.name : '—', sub: stats.favorite_conference ? `${stats.favorite_conference.count} pick${stats.favorite_conference.count === 1 ? '' : 's'}` : null },
+                { icon: Dog, label: 'Upsets · Covers', value: `${stats.upsets} · ${stats.wins - stats.upsets}`, sub: `${stats.losses} loss${stats.losses === 1 ? '' : 'es'}${stats.pushes ? `, ${stats.pushes} push` : ''}` },
+              ].map((s) => (
+                <div key={s.label} className="px-4 py-3 rounded-xl bg-white/55 border border-glass">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-text-muted mb-1"><s.icon className="h-3.5 w-3.5 text-text-orange" /> {s.label}</div>
+                  <div className="font-display text-2xl font-bold text-text-primary leading-none">{s.value}</div>
+                  {s.sub && <div className="text-xs text-text-muted mt-1">{s.sub}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="card">
           <div className="flex items-center gap-2 mb-4">
             <Dog className="h-5 w-5 text-text-orange" />
@@ -173,6 +203,23 @@ const Profile = () => {
               <label htmlFor="email" className="block text-sm font-semibold text-text-secondary mb-2">Email address</label>
               <input type="email" id="email" value={profileForm.email}
                 onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} className="input-field" required />
+            </div>
+            <div className="pt-2">
+              <div className="flex items-center gap-2 mb-3">
+                <Bell className="h-4 w-4 text-dog-navy" />
+                <span className="text-sm font-semibold text-text-secondary">Email me</span>
+              </div>
+              <div className="space-y-2">
+                {[
+                  { key: 'email_reminders', label: 'A reminder if I haven\'t picked', hint: 'Before the week\'s first kickoff.' },
+                  { key: 'email_results', label: 'When my dog settles', hint: 'Final score and the points you earned.' },
+                ].map((o) => (
+                  <label key={o.key} className="flex items-start gap-3 px-4 py-3 rounded-xl bg-white/55 border border-glass cursor-pointer">
+                    <input type="checkbox" checked={profileForm[o.key]} onChange={(e) => setProfileForm({ ...profileForm, [o.key]: e.target.checked })} className="mt-1 h-4 w-4 accent-[#E4572E]" />
+                    <span><span className="font-medium text-text-primary">{o.label}</span><span className="block text-xs text-text-muted">{o.hint}</span></span>
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="flex justify-end">
               <button type="submit" disabled={savingProfile} className="btn-primary">

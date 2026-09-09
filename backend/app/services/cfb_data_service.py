@@ -9,7 +9,9 @@ Notes on the payload that shape this code:
   - `competitions[0].odds[0]` has `spread` (magnitude) plus `homeTeamOdds` /
     `awayTeamOdds` with a `favorite` flag. Odds are only present while a game
     is upcoming — they vanish once it's final, so we persist them ourselves.
-  - `status.type.state` is one of pre / in / post.
+  - `status.type.state` is one of pre / in / post. Postponed and canceled
+    games also report `post` (with `completed: false`), so we map those to a
+    separate `canceled` status rather than settling them as 0-0.
 """
 import logging
 import re
@@ -73,8 +75,33 @@ def _rank(competitor: dict) -> Optional[int]:
     return rank if 1 <= rank <= 25 else None
 
 
+# ESPN conference ids → names (FBS). Anything else on an FBS scoreboard is an
+# FCS opponent.
+CONFERENCES = {
+    "1": "ACC", "4": "Big 12", "5": "Big Ten", "8": "SEC", "9": "Pac-12",
+    "12": "Conference USA", "15": "MAC", "17": "Mountain West",
+    "18": "Independent", "37": "Sun Belt", "151": "American",
+}
+
+
+def _conference(competitor: dict) -> Optional[str]:
+    cid = (competitor.get("team") or {}).get("conferenceId")
+    if cid is None:
+        return None
+    return CONFERENCES.get(str(cid), "FCS")
+
+
+def _record(competitor: dict) -> Optional[str]:
+    """Overall W-L like '2-0' (ESPN lists overall/home/away records)."""
+    records = competitor.get("records") or []
+    for r in records:
+        if (r.get("type") or "").lower() == "total" or (r.get("name") or "").lower() == "overall":
+            return r.get("summary")
+    return records[0].get("summary") if records else None
+
+
 def _score(competitor: dict, state: str) -> Optional[int]:
-    if state == "pre":
+    if state in ("pre", "canceled"):
         return None
     try:
         return int(competitor.get("score"))
@@ -134,7 +161,13 @@ def parse_events(data: dict, season: int, requested_week: int) -> list[dict]:
 
         status_type = ((event.get("status") or {}).get("type") or {})
         state = status_type.get("state") or "pre"
-        if state not in ("pre", "in", "post"):
+        name = (status_type.get("name") or "").upper()
+        completed = bool(status_type.get("completed"))
+        if "POSTPONED" in name or "CANCEL" in name:
+            state = "canceled"
+        elif state == "post" and not (completed or name == "STATUS_FINAL"):
+            state = "in"   # ended-but-not-final (suspended, delayed) — never settle on this
+        elif state not in ("pre", "in", "post"):
             state = "pre"
 
         week = ((event.get("week") or {}).get("number")) or requested_week
@@ -159,6 +192,8 @@ def parse_events(data: dict, season: int, requested_week: int) -> list[dict]:
             "home_logo": home["team"].get("logo"),
             "home_color": home["team"].get("color"),
             "home_rank": _rank(home),
+            "home_record": _record(home),
+            "home_conf": _conference(home),
             "home_score": _score(home, state),
             "away_team_id": str(away["team"]["id"]),
             "away_name": away["team"].get("displayName"),
@@ -166,6 +201,8 @@ def parse_events(data: dict, season: int, requested_week: int) -> list[dict]:
             "away_logo": away["team"].get("logo"),
             "away_color": away["team"].get("color"),
             "away_rank": _rank(away),
+            "away_record": _record(away),
+            "away_conf": _conference(away),
             "away_score": _score(away, state),
             "spread": spread,
             "favorite_team_id": favorite,

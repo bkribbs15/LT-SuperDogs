@@ -64,8 +64,27 @@ class Database:
                 is_active INTEGER DEFAULT 1,
                 pending_approval INTEGER DEFAULT 0,
                 must_change_password INTEGER DEFAULT 0,
+                email_reminders INTEGER DEFAULT 1,
+                email_results INTEGER DEFAULT 1,
                 created_at TEXT,
                 updated_at TEXT
+            )
+        """)
+        for col in ("email_reminders", "email_results"):
+            try:
+                cursor.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT 1")
+            except Exception:
+                pass
+
+        # One row per email actually sent, so nobody gets the same nudge twice
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                user_id TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                sent_at TEXT,
+                PRIMARY KEY (user_id, season, week, kind)
             )
         """)
 
@@ -123,6 +142,8 @@ class Database:
                 home_logo TEXT,
                 home_color TEXT,
                 home_rank INTEGER,
+                home_record TEXT,
+                home_conf TEXT,
                 home_score INTEGER,
                 away_team_id TEXT,
                 away_name TEXT,
@@ -130,6 +151,8 @@ class Database:
                 away_logo TEXT,
                 away_color TEXT,
                 away_rank INTEGER,
+                away_record TEXT,
+                away_conf TEXT,
                 away_score INTEGER,
                 spread REAL,
                 favorite_team_id TEXT,
@@ -142,6 +165,13 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS games_season_week_idx ON games (season, week)
         """)
+
+        # Migrations: columns added after the first release (no-op if present)
+        for col, coltype in (("home_record", "TEXT"), ("away_record", "TEXT"), ("home_conf", "TEXT"), ("away_conf", "TEXT")):
+            try:
+                cursor.execute(f"ALTER TABLE games ADD COLUMN {col} {coltype}")
+            except Exception:
+                pass
 
         # One SuperDog pick per user per week; one user per underdog per week
         # (first to lock it in gets it — the GameDay "no duplicate picks" rule).

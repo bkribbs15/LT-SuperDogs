@@ -58,6 +58,13 @@ export const picksAPI = {
 
 export const standingsAPI = {
   get: (season) => data(api.get('/api/standings', { params: season ? { season } : {} })),
+  recap: (season) => data(api.get('/api/standings/recap', { params: season ? { season } : {} })),
+  history: () => data(api.get('/api/standings/history')),
+  share: () => data(api.get('/api/standings/share')),
+};
+
+export const publicAPI = {
+  standings: (token) => data(api.get(`/api/public/standings/${token}`)),
 };
 
 export const adminAPI = {
@@ -84,6 +91,8 @@ export const adminAPI = {
   resolvePicks: (week) => data(api.post('/api/admin/picks/resolve', null, { params: week ? { week } : {} })),
   deletePick: (pickId) => data(api.delete(`/api/admin/picks/${pickId}`)),
   getPicks: (week) => data(api.get('/api/admin/picks', { params: week ? { week } : {} })),
+  testEmail: () => data(api.post('/api/admin/notifications/test')),
+  rotateShare: () => data(api.post('/api/admin/share/rotate')),
 };
 
 export default api;

@@ -21,6 +21,9 @@ Sister app to the [LT Masters Pool](../masters-pool) — same stack, same auth m
    the moment you pick, and that's the number your points are computed from.
 8. **Standings** rank by total points, then outright upsets, then wins. Picks stay
    hidden from other players until the game kicks off.
+9. **Postponed or canceled game?** The pick is voided (0 points, not a loss) and
+   the player can move to any dog that hasn't kicked off. If the game is
+   rescheduled, the pick comes back and settles on the real result.
 
 ## Tech stack
 
@@ -35,9 +38,10 @@ The pool starts in **week 2** (`SEASON_FIRST_WEEK` in `backend/.env`). Earlier
 weeks never appear on the board, and before week 2 opens on the calendar the
 board already sits on week 2 so picks can go in early.
 
-Lines and scores are synced from ESPN every 10 minutes (this week and next).
-ESPN removes odds once a game is final, so the app persists each game's spread
-and locks the spread onto each pick.
+Lines and scores are synced from ESPN every 10 minutes (this week and next),
+tightening to every 2 minutes while any game on the board is in play. ESPN
+removes odds once a game is final, so the app persists each game's spread and
+locks the spread onto each pick.
 
 ## Quick start (local dev)
 
@@ -93,6 +97,29 @@ Log in as the admin (owner) and open **Admin**:
 `docker-compose.prod.yml` publishes on host loopback for the Cloudflare tunnel.
 Set `FRONTEND_URL`, `BACKEND_URL` and `DB_DATA_DIR` in the environment when
 running the prod compose. See the comments at the top of each file.
+
+### Pre-flight checklist
+
+- [ ] `backend/.env`: real `JWT_SECRET_KEY` (`openssl rand -hex 32`). The API
+      refuses to boot on the example placeholder.
+- [ ] `backend/.env`: `ADMIN_EMAIL` is you, `ADMIN_PASSWORD` is not the default,
+      and you change it again after first login.
+- [ ] `DB_DATA_DIR` points at persistent storage (NAS mount), not the repo.
+- [ ] Two tunnel hostnames: web → `localhost:8190`, API → `localhost:8100`.
+      `FRONTEND_URL` = the web hostname, `BACKEND_URL` = the API hostname.
+- [ ] Nightly `scripts/backup.sh <db> <backup-dir>` in cron/launchd. It uses
+      SQLite's online backup, so it's safe while the app runs; keeps 30 copies.
+- [ ] `curl https://<api-host>/health` shows `last_sync` within the last 10 min.
+
+### What's already in place
+
+- Rate limits on login/register/reset keyed by the Cloudflare client IP, not the
+  tunnel's loopback address.
+- Security headers on both the API and nginx; API responses are `no-store`.
+- Container healthchecks + `restart: unless-stopped`; the ESPN job is
+  single-instance with coalescing, so a slow fetch never piles up.
+- Finals never un-final and hand-entered scores stick even if ESPN lags.
+- The web app is installable to a phone home screen (manifest + icons).
 
 ## Project structure
 

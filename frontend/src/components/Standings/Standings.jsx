@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Trophy, Target, Zap, RefreshCw, ChevronDown, Lock, Crown } from 'lucide-react';
+import { Trophy, Target, Zap, RefreshCw, ChevronDown, Lock, Crown, Share2, Check } from 'lucide-react';
 import Page from '../Layout/Page';
 import { standingsAPI } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
@@ -19,6 +19,22 @@ const Standings = () => {
   const [view, setView] = useState('season'); // season | week
   const [week, setWeek] = useState(null);
   const [open, setOpen] = useState(new Set());
+  const [copied, setCopied] = useState(false);
+
+  const share = async () => {
+    try {
+      const { url } = await standingsAPI.share();
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        window.prompt('Copy this link:', url);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setError('Could not create a share link');
+    }
+  };
 
   const load = async (silent = false) => {
     try {
@@ -78,6 +94,9 @@ const Standings = () => {
           {data.seasons.map((s) => <option key={s} value={s}>{s} Season</option>)}
         </select>
       )}
+      <button onClick={share} className="btn-secondary !py-2" title="Copy a read-only link for the group chat">
+        {copied ? <><Check className="h-4 w-4" /> Copied</> : <><Share2 className="h-4 w-4" /> Share</>}
+      </button>
       <button onClick={() => load(true)} disabled={refreshing} className="btn-secondary !py-2 !px-3" aria-label="Refresh"><RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /></button>
     </div>
   );

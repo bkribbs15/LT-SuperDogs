@@ -6,11 +6,16 @@ from uuid import UUID
 from app.config import is_owner_email
 
 
+# bcrypt refuses anything over 72 bytes — cap it so a long password is a 422,
+# not a 500.
+PASSWORD_MAX = 72
+
+
 class UserBase(BaseModel):
     email: EmailStr
-    username: str
-    display_name: Optional[str] = None
-    nickname: Optional[str] = None
+    username: str = Field(..., max_length=60)
+    display_name: Optional[str] = Field(None, max_length=60)
+    nickname: Optional[str] = Field(None, max_length=30)
 
 
 def _require_full_name(value: str) -> str:
@@ -22,7 +27,7 @@ def _require_full_name(value: str) -> str:
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=8, max_length=PASSWORD_MAX)
 
     @field_validator("username", "display_name")
     @classmethod
@@ -32,14 +37,16 @@ class UserCreate(UserBase):
 
 class UserLogin(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., max_length=PASSWORD_MAX)
 
 
 class UserUpdate(BaseModel):
-    username: Optional[str] = None
+    username: Optional[str] = Field(None, max_length=60)
     email: Optional[EmailStr] = None
-    display_name: Optional[str] = None
-    nickname: Optional[str] = None
+    display_name: Optional[str] = Field(None, max_length=60)
+    nickname: Optional[str] = Field(None, max_length=30)
+    email_reminders: Optional[bool] = None
+    email_results: Optional[bool] = None
 
     @field_validator("username", "display_name")
     @classmethod
@@ -57,6 +64,9 @@ class UserResponse(UserBase):
     # True while the account is on an admin-issued temporary password; the
     # frontend forces a change before anything else.
     must_change_password: bool = False
+    # Email preferences (only matter once SMTP is configured)
+    email_reminders: bool = True
+    email_results: bool = True
 
     @model_validator(mode="after")
     def _derive_owner(self):
@@ -85,8 +95,8 @@ class TokenData(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
-    new_password: str = Field(..., min_length=8)
+    current_password: str = Field(..., max_length=PASSWORD_MAX)
+    new_password: str = Field(..., min_length=8, max_length=PASSWORD_MAX)
 
 
 class MessageResponse(BaseModel):

@@ -23,6 +23,7 @@ export const RESULTS = {
   cover: { label: 'Covered', short: 'W', badge: 'badge-cover', text: 'text-result-cover', win: true, scoring: '5 points' },
   loss:  { label: 'Loss', short: 'L', badge: 'badge-loss', text: 'text-result-loss', win: false, scoring: '0 points' },
   push:  { label: 'Push', short: 'P', badge: 'badge-push', text: 'text-result-push', win: false, scoring: '1 point' },
+  void:  { label: 'Voided', short: '—', badge: 'badge-push', text: 'text-result-push', win: false, scoring: 'game postponed or canceled · 0' },
 };
 
 export const resultMeta = (result) => RESULTS[result] || null;

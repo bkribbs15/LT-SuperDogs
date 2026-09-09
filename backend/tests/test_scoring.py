@@ -25,7 +25,8 @@ from app.services.season_service import (  # noqa: E402
     points_for, is_eligible,
 )
 from app.services.pick_views import game_view  # noqa: E402
-from app.services.sync_service import upsert_games, upsert_weeks, resolve_picks  # noqa: E402
+from app.services.sync_service import upsert_games, upsert_weeks, resolve_picks, live_window  # noqa: E402
+from app.routers.board import build_board  # noqa: E402
 from app.routers import picks as picks_router  # noqa: E402
 from app.routers.standings import compute_standings  # noqa: E402
 from app.schemas.user import UserResponse  # noqa: E402
@@ -177,7 +178,8 @@ def espn_event(event_id, home, away, state="pre", odds=None, home_score=None, aw
     return {
         "id": event_id, "name": f"{away[2]} at {home[2]}", "shortName": f"{away[1]} @ {home[1]}",
         "date": "2026-09-12T19:30Z", "week": {"number": week},
-        "status": {"type": {"state": state, "shortDetail": "Final" if state == "post" else "9/12 - 3:30 PM EDT"}},
+        "status": {"type": {"state": state, "completed": state == "post", "name": "STATUS_FINAL" if state == "post" else "STATUS_SCHEDULED",
+                            "shortDetail": "Final" if state == "post" else "9/12 - 3:30 PM EDT"}},
         "competitions": [{
             "competitors": [comp(*home[:3], "home", home_score, rank=home[3] if len(home) > 3 else 99),
                             comp(*away[:3], "away", away_score)],
@@ -222,6 +224,27 @@ class TestParseEvents(unittest.TestCase):
         self.assertIsNone(g["spread"])
         self.assertEqual(g["status"], "post")
         self.assertEqual((g["home_score"], g["away_score"]), (24, 27))
+
+    def test_postponed_and_canceled_map_to_canceled(self):
+        for name, desc in (("STATUS_POSTPONED", "Postponed"), ("STATUS_CANCELED", "Canceled")):
+            ev = espn_event("1", ("1", "A", "A"), ("2", "B", "B"))
+            ev["status"] = {"type": {"state": "post", "completed": False, "name": name, "shortDetail": desc}}
+            g = espn.parse_events({"events": [ev]}, 2026, 1)[0]
+            self.assertEqual(g["status"], "canceled")
+            self.assertIsNone(g["home_score"])
+
+    def test_post_state_without_completed_is_not_final(self):
+        ev = espn_event("1", ("1", "A", "A"), ("2", "B", "B"), home_score="14", away_score="10")
+        ev["status"] = {"type": {"state": "post", "completed": False, "name": "STATUS_SUSPENDED", "shortDetail": "Suspended"}}
+        g = espn.parse_events({"events": [ev]}, 2026, 1)[0]
+        self.assertEqual(g["status"], "in")
+
+    def test_records_parsed(self):
+        ev = espn_event("1", ("1", "A", "A"), ("2", "B", "B"))
+        ev["competitions"][0]["competitors"][0]["records"] = [{"name": "overall", "type": "total", "summary": "2-0"}, {"type": "home", "summary": "1-0"}]
+        g = espn.parse_events({"events": [ev]}, 2026, 1)[0]
+        self.assertEqual(g["home_record"], "2-0")
+        self.assertIsNone(g["away_record"])
 
     def test_garbage_is_skipped(self):
         self.assertEqual(espn.parse_events({}, 2026, 1), [])
@@ -300,6 +323,74 @@ class TestSync(_DbTest):
         self.assertEqual(self.pick_result("u1"), "upset")
 
 
+class TestPostponed(_DbTest):
+    """A postponed game voids the pick and lets the player move."""
+
+    async def test_void_settles_as_zero_and_not_a_loss(self):
+        self.add_user("u1", "Bryan K")
+        self.add_game(game_id="a", status="canceled")
+        self.add_pick("u1", "a", "Aa", 6.5)
+        self.assertEqual(resolve_picks(self.conn, SEASON), 1)
+        self.assertEqual(self.pick_result("u1"), "void")
+        s = compute_standings(self.conn, SEASON)
+        self.assertEqual((s[0]["points"], s[0]["losses"], s[0]["voids"], s[0]["pending"]), (0.0, 0, 1, 0))
+
+    async def test_rescheduled_game_revives_the_pick(self):
+        self.add_user("u1", "Bryan K")
+        self.add_game(game_id="a", status="canceled")
+        self.add_pick("u1", "a", "Aa", 6.5)
+        resolve_picks(self.conn, SEASON)
+        self.assertEqual(self.pick_result("u1"), "void")
+        upsert_games(self.conn, [game_row("a", status="pre", kickoff=FUTURE)])   # back on the schedule
+        resolve_picks(self.conn, SEASON)
+        self.assertIsNone(self.pick_result("u1"))
+        upsert_games(self.conn, [game_row("a", status="post", home_score=10, away_score=20)])
+        resolve_picks(self.conn, SEASON)
+        self.assertEqual(self.pick_result("u1"), "upset")
+
+    async def test_canceled_game_is_not_pickable_but_pick_on_it_is_free_to_move(self):
+        import uuid
+        uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, "u1"))
+        self.conn.execute(
+            "INSERT INTO users (user_id, email, username, display_name, password_hash, is_admin, is_active, "
+            "pending_approval, created_at, updated_at) VALUES (?,?,?,?,?,0,1,0,?,?)",
+            (uid, "u1@test.com", "Bryan K", "Bryan K", "x", "2026-01-01", "2026-01-01"))
+        self.conn.commit()
+        user = UserResponse(user_id=uid, email="u1@test.com", username="Bryan K", display_name="Bryan K",
+                            is_admin=False, is_active=True, created_at=datetime(2026, 1, 1))
+        self.add_game(game_id="a")
+        self.add_game(game_id="b")
+        await picks_router.make_pick(picks_router.PickCreate(game_id="a", team_id="Aa"), current_user=user, session=self.conn)
+        upsert_games(self.conn, [game_row("a", status="canceled", kickoff=PAST)])
+        self.assertFalse(game_view(self.game("a"))["pickable"])
+        with self.assertRaises(HTTPException) as ctx:
+            await picks_router.make_pick(picks_router.PickCreate(game_id="a", team_id="Aa"), current_user=user, session=self.conn)
+        self.assertIn("postponed", ctx.exception.detail)
+        v = await picks_router.make_pick(picks_router.PickCreate(game_id="b", team_id="Ab"), current_user=user, session=self.conn)
+        self.assertEqual(v["team_id"], "Ab")   # moved off the dead game
+
+    def test_live_window(self):
+        self.assertFalse(live_window(self.conn))
+        self.add_game(game_id="a", kickoff=FUTURE)
+        self.assertFalse(live_window(self.conn))
+        self.add_game(game_id="b", kickoff=PAST)          # past kickoff, ESPN hasn't flipped it yet
+        self.assertTrue(live_window(self.conn))
+        upsert_games(self.conn, [game_row("b", status="post", kickoff=PAST, home_score=1, away_score=2)])
+        self.assertFalse(live_window(self.conn))
+        upsert_games(self.conn, [game_row("a", status="in", kickoff=FUTURE)])
+        self.assertTrue(live_window(self.conn))
+
+    def test_next_kickoff_skips_started_games(self):
+        user = UserResponse(user_id="00000000-0000-0000-0000-000000000001", email="x@test.com", username="X Y",
+                            display_name="X Y", is_admin=False, is_active=True, created_at=datetime(2026, 1, 1))
+        self.add_game(game_id="done", status="post", kickoff=PAST, home_score=1, away_score=2)
+        later = (NOW + timedelta(days=3)).strftime("%Y-%m-%dT%H:%MZ")
+        self.add_game(game_id="soon", kickoff=FUTURE)
+        self.add_game(game_id="later", kickoff=later)
+        board = build_board(self.conn, user, SEASON, None)
+        self.assertEqual(board["next_kickoff"], FUTURE)
+
+
 class TestCurrentWeek(_DbTest):
     def test_override_wins(self):
         set_setting(self.conn, "week_override", 7)
@@ -366,6 +457,25 @@ class TestFirstWeek(_DbTest):
         self.assertIn("this week", ctx.exception.detail)
         v = await picks_router.make_pick(picks_router.PickCreate(game_id="w2", team_id="Aw2"), current_user=user, session=self.conn)
         self.assertEqual(v["week"], 2)
+
+    async def test_my_picks_ignore_week_one(self):
+        import uuid
+        uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, "u1"))
+        self.conn.execute(
+            "INSERT INTO users (user_id, email, username, display_name, password_hash, is_admin, is_active, "
+            "pending_approval, created_at, updated_at) VALUES (?,?,?,?,?,0,1,0,?,?)",
+            (uid, "u1@test.com", "Bryan K", "Bryan K", "x", "2026-01-01", "2026-01-01"))
+        self.conn.commit()
+        user = UserResponse(user_id=uid, email="u1@test.com", username="Bryan K", display_name="Bryan K",
+                            is_admin=False, is_active=True, created_at=datetime(2026, 1, 1))
+        self.add_game(game_id="w1", week=1)
+        self.add_game(game_id="w2", week=2)
+        self.conn.execute("INSERT INTO picks (pick_id, user_id, season, week, game_id, team_id, locked_spread) VALUES ('p1', ?, ?, 1, 'w1', 'Aw1', 6.5)", (uid, SEASON))
+        self.conn.execute("INSERT INTO picks (pick_id, user_id, season, week, game_id, team_id, locked_spread) VALUES ('p2', ?, ?, 2, 'w2', 'Aw2', 6.5)", (uid, SEASON))
+        self.conn.commit()
+        mine = await picks_router.my_picks(season=None, current_user=user, session=self.conn)
+        self.assertEqual([p["week"] for p in mine["picks"]], [2])
+        self.assertEqual(mine["stats"]["picks_made"], 1)
 
     async def test_standings_ignore_week_one_picks(self):
         self.add_user("u1", "Bryan K")

@@ -10,9 +10,10 @@ from app.database import get_db
 from app.middleware.auth_middleware import get_current_user
 from app.schemas.user import UserResponse
 from app.services.season_service import (
-    current_season, current_week, underdog_team_id, has_kicked_off, utcnow, MIN_SPREAD,
+    current_season, current_week, first_week, underdog_team_id, has_kicked_off, utcnow, MIN_SPREAD,
 )
 from app.services.pick_views import pick_view, can_see_pick, team_side
+from app.services.stats_service import player_stats
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,8 @@ async def make_pick(body: PickCreate, current_user: UserResponse = Depends(get_c
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"SuperDogs must be getting at least +{MIN_SPREAD:g} — "
                                    f"{_team_name(game, dog)} is only +{float(game['spread']):g}")
+    if game["status"] == "canceled":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That game has been postponed or canceled")
     if has_kicked_off(game):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="That game has already kicked off")
 
@@ -129,15 +132,15 @@ async def drop_pick(current_user: UserResponse = Depends(get_current_user), sess
 async def my_picks(season: Optional[int] = Query(None), current_user: UserResponse = Depends(get_current_user), session=Depends(get_db)):
     season = season or current_season()
     rows = session.execute(
-        "SELECT * FROM picks WHERE user_id = ? AND season = ? ORDER BY week",
-        (str(current_user.user_id), season)).fetchall()
+        "SELECT * FROM picks WHERE user_id = ? AND season = ? AND week >= ? ORDER BY week",
+        (str(current_user.user_id), season, first_week())).fetchall()
     name = current_user.display_name or current_user.username
     out = []
     for r in rows:
         game = _game(session, r["game_id"])
         if game:
             out.append(pick_view(dict(r), game, name))
-    return out
+    return {"season": season, "picks": out, "stats": player_stats(out)}
 
 
 @router.get("/week/{week}")

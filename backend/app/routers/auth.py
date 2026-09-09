@@ -28,17 +28,18 @@ async def register(request: Request, user_data: UserCreate, session=Depends(get_
     or denies each request, so a stranger who finds the site can't get in just
     by signing up. No token is issued here; login works once approved.
     """
-    if UserAdapter.get_by_email(session, user_data.email):
+    email = str(user_data.email).strip().lower()
+    if UserAdapter.get_by_email(session, email):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
     UserAdapter.create(
-        session, str(uuid4()), user_data.email, user_data.username,
+        session, str(uuid4()), email, user_data.username,
         get_password_hash(user_data.password),
         is_admin=False, is_active=False,
         display_name=user_data.display_name, nickname=user_data.nickname,
         pending_approval=True,
     )
-    logger.info(f"New registration awaiting approval: {user_data.email}")
+    logger.info(f"New registration awaiting approval: {email}")
     return MessageResponse(
         message="Account created! The pool admin has been asked to approve it — "
                 "you'll be able to log in once they do."
@@ -46,7 +47,7 @@ async def register(request: Request, user_data: UserCreate, session=Depends(get_
 
 
 @router.post("/login", response_model=Token)
-@limiter.limit("10/minute")
+@limiter.limit("20/minute")
 async def login(request: Request, credentials: UserLogin, session=Depends(get_db)):
     user = UserAdapter.get_by_email(session, credentials.email)
     if not user or not verify_password(credentials.password, user['password_hash']):
@@ -135,7 +136,13 @@ async def update_profile(
         value = getattr(update_data, field)
         if value is not None:
             updates.append(f"{field} = ?")
-            params.append(str(value))
+            params.append(str(value).strip().lower() if field == "email" else str(value))
+
+    for field in ("email_reminders", "email_results"):
+        value = getattr(update_data, field)
+        if value is not None:
+            updates.append(f"{field} = ?")
+            params.append(1 if value else 0)
 
     if updates:
         updates.append("updated_at = ?")

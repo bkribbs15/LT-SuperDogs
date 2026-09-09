@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Home, LogOut, Menu, X, Shield, Trophy, User, ChevronDown, ClipboardList } from 'lucide-react';
+import { Home, LogOut, Menu, X, Shield, Trophy, User, ChevronDown, ClipboardList, History } from 'lucide-react';
 import { adminAPI } from '../../services/api';
 import { PawMark } from '../common/Brand';
 import { initials } from '../../utils/format';
@@ -46,6 +46,7 @@ const Navbar = () => {
     { path: '/dashboard', icon: Home, label: 'Home' },
     { path: '/board', icon: ClipboardList, label: 'The Board' },
     { path: '/standings', icon: Trophy, label: 'Standings' },
+    { path: '/history', icon: History, label: 'History' },
   ];
 
   const Badge = ({ className = '' }) =>

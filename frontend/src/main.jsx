@@ -8,3 +8,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>,
 )
+
+// Register the service worker so the app is installable to the home screen.
+// Only works in a secure context (HTTPS, or localhost) — silently skipped on
+// plain-http LAN testing.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  })
+}

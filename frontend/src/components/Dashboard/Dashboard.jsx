@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { boardAPI, standingsAPI } from '../../services/api';
-import { Trophy, Target, Zap, Users, ArrowRight, Dog, Clock, Lock, Flag, Crown } from 'lucide-react';
+import { boardAPI, standingsAPI, picksAPI } from '../../services/api';
+import { Trophy, Target, Zap, Users, ArrowRight, Dog, Clock, Lock, Flag, Crown, Radio, Flame, Newspaper } from 'lucide-react';
 import Page from '../Layout/Page';
 import TeamMark from '../common/TeamMark';
 import Countdown from '../common/Countdown';
 import ResultBadge from '../common/ResultBadge';
-import { fmtSpread, fmtKickoff, fmtPoints, ordinal, rankedName, DEFAULT_RULES } from '../../utils/format';
+import { fmtSpread, fmtKickoff, fmtPoints, ordinal, rankedName, initials, DEFAULT_RULES } from '../../utils/format';
 
 const rulesList = (r) => [
   `Every week, pick one game and take the point-spread underdog — the SuperDog. Minimum spread is +${r.min_spread}.`,
@@ -23,21 +23,36 @@ const Dashboard = () => {
   const { user } = useAuth();
   const [board, setBoard] = useState(null);
   const [table, setTable] = useState(null);
+  const [weekPicks, setWeekPicks] = useState([]);
+  const [recap, setRecap] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const load = async () => {
+    try {
+      const [b, t] = await Promise.all([boardAPI.getCurrent(), standingsAPI.get()]);
+      setBoard(b);
+      setTable(t);
+      picksAPI.getWeek(b.week).then(setWeekPicks).catch(() => {});
+      standingsAPI.recap().then((r) => setRecap(r.recap)).catch(() => {});
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    (async () => {
-      try {
-        const [b, t] = await Promise.all([boardAPI.getCurrent(), standingsAPI.get()]);
-        setBoard(b);
-        setTable(t);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    load();
+    const id = setInterval(load, 60000);   // scores move on Saturdays
+    return () => clearInterval(id);
   }, []);
+
+  // Everyone's dog this week: live first, then finals, then still-to-kick
+  const order = { in: 0, post: 1, pre: 2, canceled: 3 };
+  const dogs = [...weekPicks].sort((a, b) => (order[a.game_status] ?? 9) - (order[b.game_status] ?? 9) || (a.kickoff || '').localeCompare(b.kickoff || ''));
+  const inPlay = dogs.filter((p) => p.game_status === 'in').length;
+  const avgSpread = dogs.length ? Math.round((dogs.reduce((s, p) => s + (p.locked_spread || 0), 0) / dogs.length) * 10) / 10 : null;
+  const biggestDog = dogs.filter((p) => !p.hidden).sort((a, b) => b.locked_spread - a.locked_spread)[0];
 
   const me = table?.standings.find((e) => e.user_id === user.user_id);
   const pick = board?.my_pick;
@@ -116,7 +131,11 @@ const Dashboard = () => {
               </div>
 
               <div className="mt-auto pt-4 flex items-center justify-between gap-3 flex-wrap">
-                {pick.result || pick.game_status !== 'pre' ? (
+                {pick.game_status === 'canceled' ? (
+                  <div className="flex items-center gap-2 text-sm text-text-muted">
+                    <span className="badge badge-loss">Postponed</span> Your game was called off — grab another dog before kickoff.
+                  </div>
+                ) : pick.result || pick.game_status !== 'pre' ? (
                   <div className="flex items-center gap-2 text-sm text-text-muted">
                     <ResultBadge result={pick.result} gameStatus={pick.game_status} points={pick.points} />
                     {pick.team_score != null && <span className="font-mono-data">{pick.team_abbr} {pick.team_score} – {pick.opponent_abbr} {pick.opponent_score}</span>}
@@ -128,7 +147,7 @@ const Dashboard = () => {
                     <span className="text-text-dim">· worth {fmtPoints(rules.cover_points)} on a cover, {fmtPoints(rules.cover_points + pick.locked_spread)} outright</span>
                   </div>
                 )}
-                {!pick.kicked_off && <Link to="/board" className="btn-outline !py-2">Change pick</Link>}
+                {!pick.kicked_off && <Link to="/board" className={pick.game_status === 'canceled' ? 'btn-dog !py-2' : 'btn-outline !py-2'}>{pick.game_status === 'canceled' ? 'Pick another dog' : 'Change pick'}</Link>}
               </div>
             </>
           ) : (
@@ -138,9 +157,9 @@ const Dashboard = () => {
               </p>
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <Link to="/board" className="btn-dog">Pick your dog <ArrowRight className="h-4 w-4" /></Link>
-                {board?.first_kickoff && (
+                {board?.next_kickoff && (
                   <div className="text-sm text-text-muted flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-text-orange" /> First kickoff in <Countdown to={board.first_kickoff} done="underway" className="font-semibold text-text-primary" />
+                    <Clock className="h-4 w-4 text-text-orange" /> Next kickoff in <Countdown to={board.next_kickoff} done="underway" className="font-semibold text-text-primary" />
                   </div>
                 )}
               </div>
@@ -176,6 +195,98 @@ const Dashboard = () => {
           {leader && <p className="mt-3 text-xs text-text-muted">{fmtPoints(leader.points)} pts leads · {leader.record} · {leader.upsets} outright upset{leader.upsets === 1 ? '' : 's'}</p>}
         </div>
       </div>
+
+      {dogs.length > 0 && (
+        <div className="card mb-8">
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-dog-orange/12 rounded-xl"><Radio className="h-5 w-5 text-text-orange" /></div>
+              <h3 className="font-display text-2xl font-bold text-text-primary">Week {board?.week} dogs</h3>
+            </div>
+            <span className="text-sm text-text-muted flex items-center gap-x-3 gap-y-1 flex-wrap">
+              {inPlay > 0 ? <span className="inline-flex items-center gap-1.5 text-text-orange font-semibold"><span className="live-dot" /> {inPlay} in play</span> : <span>{dogs.length} locked in</span>}
+              {avgSpread != null && <span>· avg <span className="font-mono-data text-text-orange">{fmtSpread(avgSpread)}</span></span>}
+              {biggestDog && <span>· biggest dog <span className="font-semibold text-text-primary">{biggestDog.team_abbr}</span> <span className="font-mono-data text-text-orange">{fmtSpread(biggestDog.locked_spread)}</span></span>}
+            </span>
+          </div>
+          <ul className="divide-y divide-black/[0.06]">
+            {dogs.map((p) => (
+              <li key={p.pick_id} className={`flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1.5 py-2.5 ${p.user_id === user.user_id ? 'bg-dog-gold/10 -mx-2 px-2 rounded-lg' : ''}`}>
+                <div className="flex items-center gap-2 w-full sm:w-44 shrink-0 min-w-0">
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 bg-navy-gradient rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0">{initials(p.user_name)}</div>
+                  <div className="font-semibold text-text-primary truncate">{p.user_name}</div>
+                </div>
+                <div className="flex-1 min-w-0 flex items-center gap-2 pl-9 sm:pl-0">
+                  {p.hidden ? (
+                    <span className="text-sm text-text-muted flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" /> Locked in</span>
+                  ) : (
+                    <>
+                      <TeamMark logo={p.team_logo} abbr={p.team_abbr} size="sm" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-text-primary truncate">{p.team_abbr} <span className="font-mono-data text-text-orange">{fmtSpread(p.locked_spread)}</span> <span className="text-text-muted font-normal">{p.side === 'home' ? 'vs' : 'at'} {p.opponent_abbr}</span></div>
+                        <div className="text-xs text-text-muted truncate">
+                          {p.game_status === 'in' && <span className="text-text-orange font-semibold">● {p.status_detail} · </span>}
+                          {p.team_score != null ? <span className="font-mono-data">{p.team_abbr} {p.team_score} – {p.opponent_abbr} {p.opponent_score}</span> : fmtKickoff(p.kickoff)}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {!p.hidden && <ResultBadge result={p.result} gameStatus={p.game_status} points={p.points} />}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {recap && (
+        <div className="card mb-8">
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-dog-gold/20 rounded-xl"><Newspaper className="h-5 w-5 text-text-gold" /></div>
+              <h3 className="font-display text-2xl font-bold text-text-primary">Week {recap.week} recap</h3>
+            </div>
+            <span className="text-sm text-text-muted">
+              {recap.picks} dogs · {recap.upsets} upset{recap.upsets === 1 ? '' : 's'} · {recap.covers} cover{recap.covers === 1 ? '' : 's'} · {recap.losses} loss{recap.losses === 1 ? '' : 'es'}{recap.pushes ? ` · ${recap.pushes} push` : ''} · {fmtPoints(recap.points)} pts scored
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="p-4 rounded-xl bg-dog-gold/10 border border-dog-gold/40">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-text-gold mb-2 flex items-center gap-1.5"><Crown className="h-3.5 w-3.5" /> Dog of the week</div>
+              <div className="flex items-center gap-3">
+                <TeamMark logo={recap.dog_of_week.team_logo} abbr={recap.dog_of_week.team_abbr} />
+                <div className="min-w-0">
+                  <div className="font-display text-2xl font-bold text-text-primary leading-tight truncate">{recap.dog_of_week.user_name}</div>
+                  <div className="text-sm text-text-muted truncate">{recap.dog_of_week.team_abbr} <span className="font-mono-data text-text-orange">{fmtSpread(recap.dog_of_week.locked_spread)}</span> · <span className="font-mono-data">{recap.dog_of_week.team_score}–{recap.dog_of_week.opponent_score}</span> {recap.dog_of_week.opponent_abbr}</div>
+                </div>
+                <span className="ml-auto font-display text-3xl font-bold text-text-primary">{fmtPoints(recap.dog_of_week.points)}</span>
+              </div>
+            </div>
+            <div className="p-4 rounded-xl bg-white/60 border border-glass">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-text-muted mb-2 flex items-center gap-1.5"><Zap className="h-3.5 w-3.5 text-text-orange" /> Biggest upset</div>
+              {recap.biggest_upset ? (
+                <div className="flex items-center gap-3">
+                  <TeamMark logo={recap.biggest_upset.team_logo} abbr={recap.biggest_upset.team_abbr} />
+                  <div className="min-w-0">
+                    <div className="font-display text-2xl font-bold text-text-primary leading-tight truncate">{recap.biggest_upset.team_name}</div>
+                    <div className="text-sm text-text-muted truncate">beat {recap.biggest_upset.opponent_abbr} as a <span className="font-mono-data text-text-orange">{fmtSpread(recap.biggest_upset.locked_spread)}</span> dog · {recap.biggest_upset.user_name}</div>
+                  </div>
+                </div>
+              ) : <p className="text-text-muted">The favorites all held on. Nobody won outright.</p>}
+            </div>
+            <div className="p-4 rounded-xl bg-white/60 border border-glass">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-text-muted mb-2 flex items-center gap-1.5"><Flame className="h-3.5 w-3.5 text-text-orange" /> Hot streaks</div>
+              {recap.hot_streaks.length ? (
+                <ul className="space-y-1">
+                  {recap.hot_streaks.map((s) => (
+                    <li key={s.user_id} className="flex items-center justify-between"><span className="font-semibold text-text-primary">{s.user_name}</span><span className="font-mono-data text-text-orange">{s.streak} straight</span></li>
+                  ))}
+                </ul>
+              ) : <p className="text-text-muted">No one's on a run of two or more yet.</p>}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="flex items-center gap-3 mb-5">

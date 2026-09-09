@@ -7,9 +7,9 @@ from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.database import db
 from app.limiter import limiter
-from app.routers import auth, admin, board, picks, standings
+from app.routers import auth, admin, board, picks, standings, public
 from app.services.auth_service import get_password_hash
-from app.tasks.sync_scheduler import start_scheduler, stop_scheduler
+from app.tasks.sync_scheduler import start_scheduler, stop_scheduler, get_scheduler_status
 from datetime import datetime
 from uuid import uuid4
 import logging
@@ -40,10 +40,13 @@ async def lifespan(app: FastAPI):
 def validate_security_config():
     """Warn loudly if insecure default settings are detected at startup"""
     placeholder = "your-secret-key-here-change-this-to-something-random-and-secure"
-    if settings.jwt_secret_key == placeholder or len(settings.jwt_secret_key) < 32:
+    if settings.jwt_secret_key == placeholder:
+        # Anyone with the example file could mint admin tokens — never boot like this.
+        raise RuntimeError("JWT_SECRET_KEY is still the example placeholder. "
+                           "Set a real one: python -c \"import secrets; print(secrets.token_hex(32))\"")
+    if len(settings.jwt_secret_key) < 32:
         logger.warning("=" * 60)
-        logger.warning("SECURITY WARNING: JWT_SECRET_KEY is the default placeholder or too short.")
-        logger.warning("  python -c \"import secrets; print(secrets.token_hex(32))\"")
+        logger.warning("SECURITY WARNING: JWT_SECRET_KEY is short. Use at least 32 random bytes.")
         logger.warning("=" * 60)
     if settings.admin_password in {"ChangeThisPassword123!", "Testing123!"}:
         logger.warning("SECURITY WARNING: ADMIN_PASSWORD is a known default — change it in .env.")
@@ -91,11 +94,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(board.router)
 app.include_router(picks.router)
 app.include_router(standings.router)
+app.include_router(public.router)
 
 
 @app.get("/")
@@ -107,8 +121,11 @@ async def root():
 async def health_check():
     """Liveness + DB readiness. 503 if the database can't be queried."""
     try:
-        db.get_session().execute("SELECT 1").fetchone()
-        return {"status": "healthy"}
+        session = db.get_session()
+        session.execute("SELECT 1").fetchone()
+        last_sync = session.execute("SELECT MAX(last_updated) FROM games").fetchone()[0]
+        sched = get_scheduler_status()
+        return {"status": "healthy", "last_sync": last_sync, "scheduler_running": sched["running"]}
     except Exception as e:
         logger.error(f"Health check DB probe failed: {e}")
         return JSONResponse(status_code=503, content={"status": "unhealthy", "db": "unreachable"})

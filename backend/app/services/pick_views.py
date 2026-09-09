@@ -20,7 +20,7 @@ def game_view(game: dict) -> dict:
     g["underdog_team_id"] = dog
     g["kicked_off"] = started
     g["eligible"] = is_eligible(g)
-    g["pickable"] = g["eligible"] and not started
+    g["pickable"] = g["eligible"] and g.get("status") == "pre" and not started
     g.pop("last_updated", None)
     return g
 
@@ -66,6 +66,7 @@ def pick_view(pick: dict, game: dict, user_name: Optional[str] = None, hidden: b
         "team_logo": game.get(f"{side}_logo"),
         "team_rank": game.get(f"{side}_rank"),
         "team_score": game.get(f"{side}_score"),
+        "team_conf": game.get(f"{side}_conf"),
         "side": side,
         "opponent_id": game.get(f"{opp}_team_id"),
         "opponent_name": game.get(f"{opp}_name"),

@@ -16,6 +16,9 @@ from app.services.season_service import current_season, current_week, first_week
 from app.services.sync_service import sync_week, sync_current, resolve_picks
 from app.services.pick_views import team_side
 from app.tasks.sync_scheduler import get_scheduler_status
+from app.services.notify_service import email_configured, send_test_email
+from app.routers.standings import share_token, share_url
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +96,7 @@ async def toggle_active_status(user_id: str, current_admin: UserResponse = Depen
 
 
 class AdminPasswordReset(BaseModel):
-    new_password: str = Field(..., min_length=8)
+    new_password: str = Field(..., min_length=8, max_length=72)
 
 
 @router.post("/users/{user_id}/reset-password")
@@ -145,6 +148,14 @@ async def get_season(current_admin: UserResponse = Depends(get_current_admin_use
         "weeks": list_weeks(session, season),
         "scheduler": get_scheduler_status(),
         "last_sync": (session.execute("SELECT MAX(last_updated) FROM games WHERE season = ?", (season,)).fetchone()[0]),
+        "email": {
+            "configured": email_configured(),
+            "from": settings.smtp_from,
+            "host": settings.smtp_host,
+            "reminder_hours": settings.reminder_hours,
+            "sent": session.execute("SELECT COUNT(*) FROM notifications").fetchone()[0],
+        },
+        "share_url": share_url(share_token(session)),
     }
 
 
@@ -166,6 +177,19 @@ async def trigger_sync(week: Optional[int] = Query(None), current_admin: UserRes
     if week is not None:
         return await sync_week(current_season(), week)
     return await sync_current()
+
+
+@router.post("/notifications/test")
+async def test_email(current_admin: UserResponse = Depends(get_current_admin_user)):
+    """Send yourself a test message to prove SMTP works."""
+    return await send_test_email(current_admin.email)
+
+
+@router.post("/share/rotate")
+async def rotate_share_link(current_admin: UserResponse = Depends(get_current_admin_user), session=Depends(get_db)):
+    """Invalidate the old public standings link and mint a new one."""
+    token = share_token(session, rotate=True)
+    return {"token": token, "url": share_url(token)}
 
 
 # ── Games: manual overrides ──────────────────────────────────────────────────

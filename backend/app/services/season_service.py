@@ -8,6 +8,8 @@ Scoring (College GameDay SuperDog rules, per the on-air graphic):
   - Lose by exactly the spread  -> 1 point (push)
   - Otherwise                   -> 0 (loss)
   - Standings rank by points; outright upsets break ties.
+  - A postponed/canceled game VOIDS the pick (0 points, not a loss) and the
+    player is free to move to another dog that hasn't kicked off.
 """
 from datetime import datetime, timezone
 from typing import Optional
@@ -33,7 +35,7 @@ def points_for(result: Optional[str], locked_spread: float) -> Optional[float]:
         return COVER_POINTS
     if result == "push":
         return PUSH_POINTS
-    return 0.0
+    return 0.0   # loss, void
 
 
 def first_week() -> int:
@@ -116,9 +118,13 @@ def is_eligible(game: dict) -> bool:
 
 
 def has_kicked_off(game: dict, now: Optional[datetime] = None) -> bool:
-    """Picks lock at kickoff — by the clock, or as soon as ESPN says it's live."""
-    if game.get("status") in ("in", "post"):
+    """Picks lock at kickoff — by the clock, or as soon as ESPN says it's live.
+    A canceled game never kicked off, so a pick on it stays free to move."""
+    status = game.get("status")
+    if status in ("in", "post"):
         return True
+    if status == "canceled":
+        return False
     kickoff = parse_ts(game.get("kickoff"))
     return bool(kickoff and (now or utcnow()) >= kickoff)
 
@@ -138,7 +144,10 @@ def resolve_result(dog_score: Optional[int], fav_score: Optional[int], spread: f
 
 
 def resolve_pick(game: dict, team_id: str, locked_spread: float) -> Optional[str]:
-    """Resolve one pick against a FINAL game. None if the game isn't final."""
+    """Resolve one pick against a FINAL game. None if the game isn't final;
+    'void' if it was postponed or canceled."""
+    if game.get("status") == "canceled":
+        return "void"
     if game.get("status") != "post":
         return None
     home, away = game.get("home_score"), game.get("away_score")

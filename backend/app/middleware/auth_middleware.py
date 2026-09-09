@@ -19,6 +19,8 @@ def user_response(u: dict) -> UserResponse:
         is_active=u['is_active'],
         pending_approval=u.get('pending_approval', False),
         must_change_password=u.get('must_change_password', False),
+        email_reminders=u.get('email_reminders', True),
+        email_results=u.get('email_results', True),
         created_at=u['created_at'],
     )
 

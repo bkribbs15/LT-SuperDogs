@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 GAME_COLUMNS = (
     "game_id", "season", "week", "name", "short_name", "kickoff", "status", "status_detail",
-    "home_team_id", "home_name", "home_abbr", "home_logo", "home_color", "home_rank", "home_score",
-    "away_team_id", "away_name", "away_abbr", "away_logo", "away_color", "away_rank", "away_score",
+    "home_team_id", "home_name", "home_abbr", "home_logo", "home_color", "home_rank", "home_record", "home_conf", "home_score",
+    "away_team_id", "away_name", "away_abbr", "away_logo", "away_color", "away_rank", "away_record", "away_conf", "away_score",
     "spread", "favorite_team_id", "spread_source", "venue", "broadcast", "last_updated",
 )
 
@@ -77,12 +77,20 @@ def upsert_games(session, games: list[dict]) -> int:
 
 
 def resolve_picks(session, season: int, week: Optional[int] = None, force: bool = False) -> int:
-    """Settle every pick whose game is final. With force=True, re-settle
-    already-resolved picks too (after an admin corrects a score)."""
+    """Settle every pick whose game is final (or postponed/canceled -> void).
+    With force=True, re-settle already-resolved picks too (after an admin
+    corrects a score). A voided pick whose game gets rescheduled goes back to
+    pending so it settles on the real result."""
+    now_iso = utcnow().isoformat()
+    revived = session.execute(
+        "UPDATE picks SET result = NULL, updated_at = ? WHERE result = 'void' AND season = ? AND game_id IN "
+        "(SELECT game_id FROM games WHERE status NOT IN ('post', 'canceled'))",
+        (now_iso, season)).rowcount
+
     query = (
         "SELECT p.pick_id, p.team_id, p.locked_spread, p.result, g.* "
         "FROM picks p JOIN games g ON g.game_id = p.game_id "
-        "WHERE p.season = ? AND g.status = 'post'"
+        "WHERE p.season = ? AND g.status IN ('post', 'canceled')"
     )
     params: list = [season]
     if week is not None:
@@ -91,7 +99,7 @@ def resolve_picks(session, season: int, week: Optional[int] = None, force: bool 
     if not force:
         query += " AND p.result IS NULL"
 
-    updated = 0
+    updated = revived
     for row in session.execute(query, params).fetchall():
         r = dict(row)
         result = resolve_pick(r, r["team_id"], r["locked_spread"])
@@ -103,6 +111,19 @@ def resolve_picks(session, season: int, week: Optional[int] = None, force: bool 
             updated += 1
     session.commit()
     return updated
+
+
+def live_window(session) -> bool:
+    """True while any game on the current board is in play (or past its
+    kickoff but not yet reported live) — the scheduler tightens its cadence."""
+    season = current_season()
+    week = current_week(session, season)
+    now_espn = utcnow().strftime("%Y-%m-%dT%H:%MZ")   # ESPN's timestamp shape, so string compare is safe
+    row = session.execute(
+        "SELECT COUNT(*) FROM games WHERE season = ? AND week = ? AND "
+        "(status = 'in' OR (status = 'pre' AND kickoff <= ?))",
+        (season, week, now_espn)).fetchone()
+    return bool(row and row[0])
 
 
 async def sync_week(season: int, week: int) -> dict:

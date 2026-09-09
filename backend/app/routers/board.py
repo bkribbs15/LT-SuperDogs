@@ -5,7 +5,7 @@ from typing import Optional
 from app.database import get_db
 from app.middleware.auth_middleware import get_current_user
 from app.schemas.user import UserResponse
-from app.services.season_service import current_season, current_week, list_weeks, RULES
+from app.services.season_service import current_season, current_week, list_weeks, parse_ts, utcnow, RULES
 from app.services.pick_views import game_view, pick_view, can_see_pick
 
 router = APIRouter(prefix="/api/board", tags=["Board"])
@@ -47,7 +47,10 @@ def build_board(session, user: UserResponse, season: int, week: Optional[int]) -
         v["taken_by"] = taken["user_name"] if taken and can_see_pick(taken, g, me, user.is_admin) else None
         out.append(v)
 
-    first_kickoff = min((g["kickoff"] for g in games if g.get("kickoff")), default=None)
+    now = utcnow()
+    upcoming = [g["kickoff"] for g in games
+                if g.get("status") == "pre" and g.get("kickoff") and parse_ts(g["kickoff"]) > now]
+    next_kickoff = min(upcoming, default=None)
     return {
         "season": season,
         "week": week,
@@ -55,7 +58,7 @@ def build_board(session, user: UserResponse, season: int, week: Optional[int]) -
         "weeks": weeks,
         "games": out,
         "my_pick": my_pick,
-        "first_kickoff": first_kickoff,
+        "next_kickoff": next_kickoff,
         "picks_in": len(picks),
         "rules": RULES,
     }

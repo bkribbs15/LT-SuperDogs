@@ -1,27 +1,25 @@
-name: Backend Tests
+name: Tests & Build
 
-# Safety net for the SuperDog rules (backend/tests). Runs the zero-dependency
-# unittest suite on every backend change so a scoring regression fails loudly
-# before a Saturday.
+# Safety net: the SuperDog rules suite (backend/tests) and a production build
+# of the frontend, on every change, so a regression fails loudly before a
+# Saturday.
 
 on:
   push:
     branches: [main]
-    paths: ['backend/**', '.github/workflows/tests.yml']
   pull_request:
     branches: [main]
-    paths: ['backend/**', '.github/workflows/tests.yml']
   workflow_dispatch:
 
 jobs:
   backend:
-    name: Run rules suite
+    name: Rules suite
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./backend
     env:
-      JWT_SECRET_KEY: ci-dummy-secret-not-used
+      JWT_SECRET_KEY: ci-dummy-secret-not-used-anywhere-real
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,3 +29,19 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
       - run: python -m unittest discover -s tests -t . -v
+
+  frontend:
+    name: Production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build

@@ -17,6 +17,8 @@ def _row_to_user(row) -> Dict[str, Any]:
         'is_active': bool(row['is_active']),
         'must_change_password': bool(row['must_change_password']),
         'pending_approval': bool(row['pending_approval']),
+        'email_reminders': bool(row['email_reminders']) if 'email_reminders' in row.keys() and row['email_reminders'] is not None else True,
+        'email_results': bool(row['email_results']) if 'email_results' in row.keys() and row['email_results'] is not None else True,
         'created_at': datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
         'updated_at': datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
     }
